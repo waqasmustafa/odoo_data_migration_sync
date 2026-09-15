@@ -47,6 +47,12 @@ class BaseMigrator:
     matching_keys = []
     batch_size = 200
     domain = []
+    # Fields that are a Many2one back onto this same target_model (e.g.
+    # res.partner.parent_id, product.category.parent_id). A loose business-key
+    # match (shared email/VAT between a company and its own contact) can
+    # otherwise resolve one of these to the record's own id and Odoo's
+    # recursion check would reject the write outright.
+    self_referential_fields = []
 
     def __init__(self, env, connection, adapter, run):
         self.env = env
@@ -112,6 +118,17 @@ class BaseMigrator:
                 return found
         return Target.browse()
 
+    def _guard_self_reference(self, values, target_id):
+        """Drop any self-referential field that would point a record at
+        itself (e.g. a contact business-key-matched onto its own parent
+        company). Returns the list of field names that were stripped."""
+        stripped = []
+        for field in self.self_referential_fields:
+            if values.get(field) == target_id:
+                values[field] = False
+                stripped.append(field)
+        return stripped
+
     # ---- main entry point ----
     def fetch_source_ids(self, only_source_ids=None):
         if only_source_ids is not None:
@@ -154,15 +171,19 @@ class BaseMigrator:
                     line_vals.append(self._line_vals(
                         source_id, 'error', 'Missing dependency', missing, existing_target_id))
                     return
+                stripped = self._guard_self_reference(values, existing_target_id)
+                note = ('Dropped self-referential field(s): %s' % ', '.join(stripped)
+                        if stripped else None)
                 if self.run.dry_run:
                     counts['updated'] += 1
                     line_vals.append(self._line_vals(
-                        source_id, 'updated', 'Dry run - not written', target_id=existing_target_id))
+                        source_id, 'updated', note or 'Dry run - not written',
+                        target_id=existing_target_id))
                     return
                 Target.browse(existing_target_id).write(values)
                 self._after_write(record, existing_target_id)
                 counts['updated'] += 1
-                line_vals.append(self._line_vals(source_id, 'updated', target_id=existing_target_id))
+                line_vals.append(self._line_vals(source_id, 'updated', note, target_id=existing_target_id))
             else:
                 counts['skipped'] += 1
                 line_vals.append(self._line_vals(
@@ -185,14 +206,18 @@ class BaseMigrator:
 
         match = self.find_business_match(values)
         if match:
+            note = None
             if not self.run.dry_run:
                 self.Mapping.set_mapping(
                     self.connection.id, self.source_model, source_id, self.target_model, match.id)
                 if self.run.mode == 'create_update':
+                    stripped = self._guard_self_reference(values, match.id)
+                    if stripped:
+                        note = 'Dropped self-referential field(s): %s' % ', '.join(stripped)
                     match.write(values)
                 self._after_write(record, match.id)
             counts['matched'] += 1
-            line_vals.append(self._line_vals(source_id, 'matched', target_id=match.id))
+            line_vals.append(self._line_vals(source_id, 'matched', note, target_id=match.id))
             return
 
         if self.run.dry_run:

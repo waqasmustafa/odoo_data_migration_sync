@@ -11,6 +11,7 @@ class ResPartnerMigrator(BaseMigrator):
         'function', 'lang', 'parent_id',
     ]
     matching_keys = ['ref', 'vat', 'email']
+    self_referential_fields = ['parent_id']
 
     def transform(self, record, is_update=False):
         values = {
@@ -44,6 +45,7 @@ class ProductCategoryMigrator(BaseMigrator):
     target_model = 'product.category'
     source_fields = ['name', 'parent_id']
     matching_keys = ['name']
+    self_referential_fields = ['parent_id']
 
     def transform(self, record, is_update=False):
         values = {'name': record.get('name') or 'Unknown'}

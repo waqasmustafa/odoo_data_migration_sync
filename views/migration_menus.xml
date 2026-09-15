@@ -24,4 +24,9 @@
               action="action_migration_errors"
               sequence="30"/>
 
+    <menuitem id="menu_migration_mappings" name="Mappings"
+              parent="menu_migration_root"
+              action="action_migration_record_mapping"
+              sequence="40"/>
+
 </odoo>

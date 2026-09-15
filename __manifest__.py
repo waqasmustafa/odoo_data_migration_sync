@@ -20,6 +20,7 @@ on this database before their data can be migrated.
         'security/ir.model.access.csv',
         'views/migration_connection_views.xml',
         'views/migration_run_views.xml',
+        'views/migration_mapping_views.xml',
         'wizard/migration_wizard_views.xml',
         'views/migration_menus.xml',
     ],

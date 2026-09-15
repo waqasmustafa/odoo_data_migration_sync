@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+
+    <record id="view_migration_record_mapping_list" model="ir.ui.view">
+        <field name="name">migration.record.mapping.list</field>
+        <field name="model">migration.record.mapping</field>
+        <field name="arch" type="xml">
+            <list string="Record Mappings" editable="bottom">
+                <field name="connection_id"/>
+                <field name="source_model"/>
+                <field name="source_res_id"/>
+                <field name="target_model"/>
+                <field name="target_res_id"/>
+            </list>
+        </field>
+    </record>
+
+    <record id="view_migration_record_mapping_search" model="ir.ui.view">
+        <field name="name">migration.record.mapping.search</field>
+        <field name="model">migration.record.mapping</field>
+        <field name="arch" type="xml">
+            <search string="Record Mappings">
+                <field name="source_model"/>
+                <field name="source_res_id"/>
+                <field name="target_res_id"/>
+                <field name="connection_id"/>
+                <group expand="0" string="Group By">
+                    <filter name="group_source_model" string="Source Model" context="{'group_by': 'source_model'}"/>
+                    <filter name="group_connection" string="Connection" context="{'group_by': 'connection_id'}"/>
+                </group>
+            </search>
+        </field>
+    </record>
+
+    <record id="action_migration_record_mapping" model="ir.actions.act_window">
+        <field name="name">Mappings</field>
+        <field name="res_model">migration.record.mapping</field>
+        <field name="view_mode">list</field>
+        <field name="search_view_id" ref="view_migration_record_mapping_search"/>
+    </record>
+
+</odoo>
