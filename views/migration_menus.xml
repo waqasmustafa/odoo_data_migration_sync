@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+
+    <menuitem id="menu_migration_root" name="Migration"
+              sequence="90" groups="base.group_system"/>
+
+    <menuitem id="menu_migration_wizard" name="Migration Wizard"
+              parent="menu_migration_root"
+              action="action_migration_wizard"
+              sequence="5"/>
+
+    <menuitem id="menu_migration_connections" name="Connections"
+              parent="menu_migration_root"
+              action="action_migration_connection"
+              sequence="10"/>
+
+    <menuitem id="menu_migration_runs" name="Runs"
+              parent="menu_migration_root"
+              action="action_migration_run"
+              sequence="20"/>
+
+    <menuitem id="menu_migration_errors" name="Errors"
+              parent="menu_migration_root"
+              action="action_migration_errors"
+              sequence="30"/>
+
+</odoo>

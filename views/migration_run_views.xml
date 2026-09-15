@@ -1,0 +1,108 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+
+    <record id="view_migration_run_form" model="ir.ui.view">
+        <field name="name">migration.run.form</field>
+        <field name="model">migration.run</field>
+        <field name="arch" type="xml">
+            <form string="Migration Run">
+                <header>
+                    <button name="action_run" type="object" string="Run Again"
+                            class="btn-primary" invisible="state == 'running'"/>
+                    <field name="state" widget="statusbar" statusbar_visible="draft,running,done"/>
+                </header>
+                <sheet>
+                    <div class="oe_title">
+                        <h1><field name="name"/></h1>
+                    </div>
+                    <group>
+                        <group>
+                            <field name="connection_id"/>
+                            <field name="model_keys"/>
+                            <field name="mode"/>
+                            <field name="dry_run"/>
+                        </group>
+                        <group>
+                            <field name="user_id"/>
+                            <field name="start_date"/>
+                            <field name="end_date"/>
+                        </group>
+                    </group>
+                    <group string="Results">
+                        <field name="created_count"/>
+                        <field name="updated_count"/>
+                        <field name="skipped_count"/>
+                        <field name="error_count"/>
+                    </group>
+                    <button name="action_view_errors" type="object" string="View Errors"
+                            invisible="error_count == 0"/>
+                    <notebook>
+                        <page string="Record Log">
+                            <field name="line_ids" readonly="1">
+                                <list>
+                                    <field name="model_key"/>
+                                    <field name="source_model"/>
+                                    <field name="source_res_id"/>
+                                    <field name="target_res_id"/>
+                                    <field name="state" decoration-danger="state == 'error'"
+                                           decoration-success="state in ('created','updated')"/>
+                                    <field name="message"/>
+                                    <field name="missing_dependency"/>
+                                </list>
+                            </field>
+                        </page>
+                    </notebook>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <record id="view_migration_run_list" model="ir.ui.view">
+        <field name="name">migration.run.list</field>
+        <field name="model">migration.run</field>
+        <field name="arch" type="xml">
+            <list string="Migration Runs">
+                <field name="name"/>
+                <field name="connection_id"/>
+                <field name="dry_run"/>
+                <field name="state"/>
+                <field name="created_count"/>
+                <field name="updated_count"/>
+                <field name="skipped_count"/>
+                <field name="error_count"/>
+                <field name="start_date"/>
+            </list>
+        </field>
+    </record>
+
+    <record id="action_migration_run" model="ir.actions.act_window">
+        <field name="name">Runs</field>
+        <field name="res_model">migration.run</field>
+        <field name="view_mode">list,form</field>
+    </record>
+
+    <record id="view_migration_run_line_list" model="ir.ui.view">
+        <field name="name">migration.run.line.list</field>
+        <field name="model">migration.run.line</field>
+        <field name="arch" type="xml">
+            <list string="Errors">
+                <field name="run_id"/>
+                <field name="model_key"/>
+                <field name="source_model"/>
+                <field name="source_res_id"/>
+                <field name="state"/>
+                <field name="message"/>
+                <field name="missing_dependency"/>
+                <button name="action_retry" type="object" string="Retry" icon="fa-refresh"/>
+            </list>
+        </field>
+    </record>
+
+    <record id="action_migration_errors" model="ir.actions.act_window">
+        <field name="name">Errors</field>
+        <field name="res_model">migration.run.line</field>
+        <field name="view_mode">list,form</field>
+        <field name="domain">[('state', '=', 'error')]</field>
+    </record>
+
+</odoo>

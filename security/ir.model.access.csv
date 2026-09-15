@@ -1,0 +1,6 @@
+id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
+access_migration_connection_system,migration.connection.system,model_migration_connection,base.group_system,1,1,1,1
+access_migration_record_mapping_system,migration.record.mapping.system,model_migration_record_mapping,base.group_system,1,1,1,1
+access_migration_run_system,migration.run.system,model_migration_run,base.group_system,1,1,1,1
+access_migration_run_line_system,migration.run.line.system,model_migration_run_line,base.group_system,1,1,1,1
+access_migration_wizard_system,migration.wizard.system,model_migration_wizard,base.group_system,1,1,1,1
