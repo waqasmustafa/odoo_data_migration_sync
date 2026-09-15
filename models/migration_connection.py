@@ -32,37 +32,47 @@ class MigrationConnection(models.Model):
         return get_adapter(self.transport, self.url, self.database,
                             self.username, self.password)
 
+    def _notify(self, title, message, level='success', sticky=False):
+        return {
+            'type': 'ir.actions.client',
+            'tag': 'display_notification',
+            'params': {
+                'title': title,
+                'message': message,
+                'type': level,  # 'success', 'warning', 'danger', 'info'
+                'sticky': sticky,
+            },
+        }
+
     def action_test_connection(self):
-        for connection in self:
-            adapter = connection._get_adapter()
-            try:
-                adapter.connect()
-            except MigrationConnectionError as exc:
-                connection.write({
-                    'state': 'error',
-                    'last_test_result': str(exc),
-                })
-                raise UserError(str(exc)) from exc
-            connection.write({
-                'state': 'tested',
-                'last_test_result': 'Connected successfully as uid %s' % adapter.uid,
-            })
-        return True
+        self.ensure_one()
+        adapter = self._get_adapter()
+        try:
+            adapter.connect()
+        except MigrationConnectionError as exc:
+            self.write({'state': 'error', 'last_test_result': str(exc)})
+            return self._notify('Connection Failed', str(exc), level='danger', sticky=True)
+        self.write({
+            'state': 'tested',
+            'last_test_result': 'Connected successfully as uid %s' % adapter.uid,
+        })
+        return self._notify('Connection Successful',
+                             'Connected to %s as uid %s' % (self.database, adapter.uid))
 
     def action_detect_version(self):
-        for connection in self:
-            adapter = connection._get_adapter()
-            try:
-                version = adapter.get_version()
-            except MigrationConnectionError as exc:
-                connection.write({'state': 'error', 'last_test_result': str(exc)})
-                raise UserError(str(exc)) from exc
-            connection.write({
-                'state': 'tested',
-                'odoo_version': version,
-                'last_test_result': 'Detected server version: %s' % version,
-            })
-        return True
+        self.ensure_one()
+        adapter = self._get_adapter()
+        try:
+            version = adapter.get_version()
+        except MigrationConnectionError as exc:
+            self.write({'state': 'error', 'last_test_result': str(exc)})
+            return self._notify('Version Detection Failed', str(exc), level='danger', sticky=True)
+        self.write({
+            'state': 'tested',
+            'odoo_version': version,
+            'last_test_result': 'Detected server version: %s' % version,
+        })
+        return self._notify('Version Detected', 'Source server is running Odoo %s' % version)
 
     def fetch_source_models(self):
         """Fetch the list of models installed on the source as a first
@@ -88,12 +98,15 @@ class MigrationConnection(models.Model):
         return model_records
 
     def action_load_models(self):
-        """Button entry point - runs fetch_source_models() and just
-        refreshes the form; the model list itself is only consumed
-        programmatically for now."""
-        for connection in self:
-            connection.fetch_source_models()
-        return True
+        """Button entry point - runs fetch_source_models() and shows a
+        notification with the result."""
+        self.ensure_one()
+        try:
+            model_records = self.fetch_source_models()
+        except UserError as exc:
+            return self._notify('Load Models Failed', str(exc), level='danger', sticky=True)
+        return self._notify('Models Loaded',
+                             'Loaded %s models from the source database.' % len(model_records))
 
     def action_open_wizard(self):
         """Launch the Migration Wizard pre-filled with this connection."""
