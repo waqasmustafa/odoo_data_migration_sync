@@ -94,3 +94,17 @@ class MigrationConnection(models.Model):
         for connection in self:
             connection.fetch_source_models()
         return True
+
+    def action_open_wizard(self):
+        """Launch the Migration Wizard pre-filled with this connection."""
+        self.ensure_one()
+        if self.state == 'draft':
+            raise UserError('Please Test Connection first.')
+        return {
+            'type': 'ir.actions.act_window',
+            'name': 'Migration Wizard',
+            'res_model': 'migration.wizard',
+            'view_mode': 'form',
+            'target': 'new',
+            'context': {'default_connection_id': self.id},
+        }
