@@ -4,3 +4,4 @@ access_migration_record_mapping_system,migration.record.mapping.system,model_mig
 access_migration_run_system,migration.run.system,model_migration_run,base.group_system,1,1,1,1
 access_migration_run_line_system,migration.run.line.system,model_migration_run_line,base.group_system,1,1,1,1
 access_migration_wizard_system,migration.wizard.system,model_migration_wizard,base.group_system,1,1,1,1
+access_migration_crm_stage_mapping_system,migration.crm.stage.mapping.system,model_migration_crm_stage_mapping,base.group_system,1,1,1,1

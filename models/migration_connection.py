@@ -108,6 +108,47 @@ class MigrationConnection(models.Model):
         return self._notify('Models Loaded',
                              'Loaded %s models from the source database.' % len(model_records))
 
+    def action_fetch_crm_stages(self):
+        """Pull crm.stage records from the source and create/refresh one
+        migration.crm.stage.mapping row per stage (target stage left empty
+        the first time, preserved on refetch). User then picks a target
+        stage for each row before migrating CRM leads."""
+        self.ensure_one()
+        adapter = self._get_adapter()
+        try:
+            adapter.connect()
+            stages = adapter.search_read(
+                'crm.stage', [], fields=['name', 'sequence'], order='sequence')
+        except MigrationConnectionError as exc:
+            self.write({'state': 'error', 'last_test_result': str(exc)})
+            return self._notify('Fetch Stages Failed', str(exc), level='danger', sticky=True)
+
+        Mapping = self.env['migration.crm.stage.mapping']
+        for stage in stages:
+            existing = Mapping.search([
+                ('connection_id', '=', self.id),
+                ('source_stage_id', '=', stage['id']),
+            ], limit=1)
+            vals = {
+                'connection_id': self.id,
+                'source_stage_id': stage['id'],
+                'source_stage_name': stage['name'],
+                'sequence': stage.get('sequence') or 10,
+            }
+            if existing:
+                existing.write(vals)
+            else:
+                Mapping.create(vals)
+
+        return {
+            'type': 'ir.actions.act_window',
+            'name': 'CRM Stage Mapping - %s' % self.name,
+            'res_model': 'migration.crm.stage.mapping',
+            'view_mode': 'list',
+            'domain': [('connection_id', '=', self.id)],
+            'context': {'default_connection_id': self.id},
+        }
+
     def action_open_wizard(self):
         """Launch the Migration Wizard pre-filled with this connection."""
         self.ensure_one()

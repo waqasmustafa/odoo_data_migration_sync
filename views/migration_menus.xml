@@ -29,4 +29,9 @@
               action="action_migration_record_mapping"
               sequence="40"/>
 
+    <menuitem id="menu_migration_crm_stage_mapping" name="CRM Stage Mapping"
+              parent="menu_migration_root"
+              action="action_migration_crm_stage_mapping"
+              sequence="50"/>
+
 </odoo>

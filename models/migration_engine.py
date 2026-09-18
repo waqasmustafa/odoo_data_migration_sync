@@ -107,6 +107,68 @@ class BaseMigrator:
         cache[name] = rec.id if rec else False
         return cache[name]
 
+    def resolve_or_create_by_name(self, target_model, name, cache_attr, extra_vals=None):
+        """Like resolve_by_name but creates a lightweight record when no
+        match exists. Only safe for low-risk, no-side-effect models (tags,
+        UTM sources/mediums) - never for structural/configured models."""
+        if not name:
+            return False
+        cache = getattr(self, cache_attr, None)
+        if cache is None:
+            cache = {}
+            setattr(self, cache_attr, cache)
+        if name in cache:
+            return cache[name]
+        rec = self.env[target_model].search([('name', '=', name)], limit=1)
+        if not rec:
+            vals = {'name': name}
+            if extra_vals:
+                vals.update(extra_vals)
+            rec = self.env[target_model].create(vals)
+        cache[name] = rec.id
+        return cache[name]
+
+    def resolve_or_create_m2m_by_name(self, source_comodel, source_ids, target_model, cache_attr):
+        """Many2many equivalent of resolve_or_create_by_name: fetches the
+        names of the not-yet-cached source ids in one batch read, then
+        find-or-creates matching target records."""
+        if not source_ids:
+            return []
+        cache = getattr(self, cache_attr, None)
+        if cache is None:
+            cache = {}
+            setattr(self, cache_attr, cache)
+
+        uncached = [sid for sid in source_ids if sid not in cache]
+        if uncached:
+            for rec in self.adapter.read(source_comodel, uncached, fields=['name']):
+                cache[rec['id']] = self.resolve_or_create_by_name(
+                    target_model, rec.get('name'), cache_attr + '_by_name')
+
+        return [cache[sid] for sid in source_ids if cache.get(sid)]
+
+    def resolve_user(self, user_field, cache_attr='_user_login_cache'):
+        """Resolve a Many2one res.users value by login (typically the
+        user's email), which is far more reliable across databases than
+        matching on display name."""
+        if not user_field:
+            return False
+        source_user_id = user_field[0] if isinstance(user_field, (list, tuple)) else user_field
+        cache = getattr(self, cache_attr, None)
+        if cache is None:
+            cache = {}
+            setattr(self, cache_attr, cache)
+        if source_user_id in cache:
+            return cache[source_user_id]
+        recs = self.adapter.read('res.users', [source_user_id], fields=['login'])
+        login = recs[0].get('login') if recs else None
+        target_id = False
+        if login:
+            target = self.env['res.users'].search([('login', '=', login)], limit=1)
+            target_id = target.id if target else False
+        cache[source_user_id] = target_id
+        return target_id
+
     def find_business_match(self, values):
         """Returns (match_record_or_empty, matched_key_or_None, rejected_note_or_None).
 

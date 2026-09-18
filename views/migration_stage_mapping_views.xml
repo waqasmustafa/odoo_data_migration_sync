@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+
+    <record id="view_migration_crm_stage_mapping_list" model="ir.ui.view">
+        <field name="name">migration.crm.stage.mapping.list</field>
+        <field name="model">migration.crm.stage.mapping</field>
+        <field name="arch" type="xml">
+            <list string="CRM Stage Mapping" editable="bottom">
+                <field name="connection_id" column_invisible="1"/>
+                <field name="sequence" widget="handle"/>
+                <field name="source_stage_name" string="Source Stage (Odoo 17)" readonly="1"/>
+                <field name="target_stage_id" string="Target Stage (Odoo 18)"/>
+            </list>
+        </field>
+    </record>
+
+    <record id="action_migration_crm_stage_mapping" model="ir.actions.act_window">
+        <field name="name">CRM Stage Mapping</field>
+        <field name="res_model">migration.crm.stage.mapping</field>
+        <field name="view_mode">list</field>
+    </record>
+
+</odoo>

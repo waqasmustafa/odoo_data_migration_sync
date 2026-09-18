@@ -1,8 +1,36 @@
 from .migration_engine import BaseMigrator, register_migrator
 
 
+class _AddressMixin:
+    """Shared country/state resolution for any migrator whose source model
+    carries a direct country_id/state_id (res.partner, crm.lead)."""
+
+    def _resolve_country(self, country_field):
+        if not country_field:
+            return False
+        return self.resolve_by_name('res.country', country_field[1], '_country_cache')
+
+    def _resolve_state(self, state_field, country_id):
+        if not state_field:
+            return False
+        name = state_field[1]
+        cache = getattr(self, '_state_cache', None)
+        if cache is None:
+            cache = {}
+            self._state_cache = cache
+        cache_key = (name, country_id)
+        if cache_key in cache:
+            return cache[cache_key]
+        domain = [('name', '=', name)]
+        if country_id:
+            domain.append(('country_id', '=', country_id))
+        rec = self.env['res.country.state'].search(domain, limit=1)
+        cache[cache_key] = rec.id if rec else False
+        return cache[cache_key]
+
+
 @register_migrator('res_partner')
-class ResPartnerMigrator(BaseMigrator):
+class ResPartnerMigrator(_AddressMixin, BaseMigrator):
     source_model = 'res.partner'
     target_model = 'res.partner'
     source_fields = [
@@ -37,18 +65,13 @@ class ResPartnerMigrator(BaseMigrator):
         if parent_id:
             values['parent_id'] = parent_id
 
-        country = record.get('country_id')
-        country_id = False
-        if country:
-            country_id = self.resolve_by_name('res.country', country[1], '_country_cache')
-            if country_id:
-                values['country_id'] = country_id
+        country_id = self._resolve_country(record.get('country_id'))
+        if country_id:
+            values['country_id'] = country_id
 
-        state = record.get('state_id')
-        if state:
-            state_id = self._resolve_state(state[1], country_id)
-            if state_id:
-                values['state_id'] = state_id
+        state_id = self._resolve_state(record.get('state_id'), country_id)
+        if state_id:
+            values['state_id'] = state_id
 
         title = record.get('title')
         if title:
@@ -57,21 +80,6 @@ class ResPartnerMigrator(BaseMigrator):
                 values['title'] = title_id
 
         return values, None
-
-    def _resolve_state(self, name, country_id):
-        cache = getattr(self, '_state_cache', None)
-        if cache is None:
-            cache = {}
-            self._state_cache = cache
-        cache_key = (name, country_id)
-        if cache_key in cache:
-            return cache[cache_key]
-        domain = [('name', '=', name)]
-        if country_id:
-            domain.append(('country_id', '=', country_id))
-        rec = self.env['res.country.state'].search(domain, limit=1)
-        cache[cache_key] = rec.id if rec else False
-        return cache[cache_key]
 
 
 @register_migrator('product_category')
@@ -176,12 +184,15 @@ class ProductTemplateMigrator(BaseMigrator):
 
 
 @register_migrator('crm_lead')
-class CrmLeadMigrator(BaseMigrator):
+class CrmLeadMigrator(_AddressMixin, BaseMigrator):
     source_model = 'crm.lead'
     target_model = 'crm.lead'
     source_fields = [
-        'name', 'partner_name', 'contact_name', 'email_from', 'phone',
-        'description', 'type', 'partner_id', 'expected_revenue', 'probability',
+        'name', 'partner_name', 'contact_name', 'email_from', 'phone', 'mobile',
+        'website', 'function', 'street', 'street2', 'city', 'zip', 'country_id',
+        'state_id', 'description', 'type', 'partner_id', 'expected_revenue',
+        'probability', 'priority', 'date_deadline', 'stage_id', 'user_id',
+        'team_id', 'tag_ids', 'source_id', 'medium_id', 'lost_reason_id',
     ]
     matching_keys = []
     domain = [('active', 'in', [True, False])]
@@ -193,18 +204,92 @@ class CrmLeadMigrator(BaseMigrator):
             'contact_name': record.get('contact_name') or False,
             'email_from': record.get('email_from') or False,
             'phone': record.get('phone') or False,
+            'mobile': record.get('mobile') or False,
+            'website': record.get('website') or False,
+            'function': record.get('function') or False,
+            'street': record.get('street') or False,
+            'street2': record.get('street2') or False,
+            'city': record.get('city') or False,
+            'zip': record.get('zip') or False,
             'description': record.get('description') or False,
             'type': record.get('type') or 'lead',
             'expected_revenue': record.get('expected_revenue') or 0.0,
             'probability': record.get('probability') or 0.0,
+            'priority': record.get('priority') or '0',
+            'date_deadline': record.get('date_deadline') or False,
         }
+
         partner_id, missing = self.resolve_m2o('res.partner', record.get('partner_id'))
         if missing:
             # A lead's linked customer is nice-to-have, not required - do not block.
             missing = None
         if partner_id:
             values['partner_id'] = partner_id
+
+        country_id = self._resolve_country(record.get('country_id'))
+        if country_id:
+            values['country_id'] = country_id
+        state_id = self._resolve_state(record.get('state_id'), country_id)
+        if state_id:
+            values['state_id'] = state_id
+
+        stage_id = self._resolve_stage(record.get('stage_id'))
+        if stage_id:
+            values['stage_id'] = stage_id
+
+        user_id = self.resolve_user(record.get('user_id'))
+        if user_id:
+            values['user_id'] = user_id
+
+        team = record.get('team_id')
+        if team:
+            team_id = self.resolve_by_name('crm.team', team[1], '_team_cache')
+            if team_id:
+                values['team_id'] = team_id
+
+        source = record.get('source_id')
+        if source:
+            source_id = self.resolve_or_create_by_name('utm.source', source[1], '_source_cache')
+            if source_id:
+                values['source_id'] = source_id
+
+        medium = record.get('medium_id')
+        if medium:
+            medium_id = self.resolve_or_create_by_name('utm.medium', medium[1], '_medium_cache')
+            if medium_id:
+                values['medium_id'] = medium_id
+
+        lost_reason = record.get('lost_reason_id')
+        if lost_reason:
+            lost_reason_id = self.resolve_by_name(
+                'crm.lost.reason', lost_reason[1], '_lost_reason_cache')
+            if lost_reason_id:
+                values['lost_reason_id'] = lost_reason_id
+
+        tag_ids = record.get('tag_ids')
+        if tag_ids:
+            values['tag_ids'] = [(6, 0, self.resolve_or_create_m2m_by_name(
+                'crm.tag', tag_ids, 'crm.tag', '_tag_cache'))]
+
         return values, missing
+
+    def _resolve_stage(self, stage_field):
+        if not stage_field:
+            return False
+        source_stage_id = stage_field[0] if isinstance(stage_field, (list, tuple)) else stage_field
+        cache = getattr(self, '_stage_cache', None)
+        if cache is None:
+            cache = {}
+            self._stage_cache = cache
+        if source_stage_id in cache:
+            return cache[source_stage_id]
+        mapping = self.env['migration.crm.stage.mapping'].search([
+            ('connection_id', '=', self.connection.id),
+            ('source_stage_id', '=', source_stage_id),
+        ], limit=1)
+        target_id = mapping.target_stage_id.id if mapping and mapping.target_stage_id else False
+        cache[source_stage_id] = target_id
+        return target_id
 
 
 class _OrderMigratorMixin:

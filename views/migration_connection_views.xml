@@ -13,6 +13,9 @@
                             string="Detect Version" class="btn-secondary"/>
                     <button name="action_load_models" type="object"
                             string="Load Models" class="btn-secondary"/>
+                    <button name="action_fetch_crm_stages" type="object"
+                            string="Fetch CRM Stages" class="btn-secondary"
+                            invisible="state != 'tested'"/>
                     <button name="action_open_wizard" type="object"
                             string="Migrate Data" class="btn-primary"
                             invisible="state != 'tested'"/>
