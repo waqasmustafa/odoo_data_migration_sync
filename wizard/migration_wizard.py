@@ -26,14 +26,17 @@ class MigrationWizard(models.TransientModel):
 
     def _selected_keys(self):
         mapping = {
-            'migrate_partners': 'res_partner',
-            'migrate_categories': 'product_category',
-            'migrate_products': 'product_template',
-            'migrate_crm': 'crm_lead',
-            'migrate_sales': 'sale_order',
-            'migrate_purchases': 'purchase_order',
+            'migrate_partners': ('res_partner',),
+            'migrate_categories': ('product_category',),
+            'migrate_products': ('product_attribute', 'product_attribute_value', 'product_template'),
+            'migrate_crm': ('crm_lead',),
+            'migrate_sales': ('sale_order',),
+            'migrate_purchases': ('purchase_order',),
         }
-        keys = [key for field, key in mapping.items() if self[field]]
+        keys = []
+        for field, field_keys in mapping.items():
+            if self[field]:
+                keys.extend(field_keys)
         if not keys:
             raise UserError('Select at least one type of data to migrate.')
         return keys

@@ -119,6 +119,56 @@ class ProductCategoryMigrator(BaseMigrator):
         return found, 'name+parent', None
 
 
+@register_migrator('product_attribute')
+class ProductAttributeMigrator(BaseMigrator):
+    source_model = 'product.attribute'
+    target_model = 'product.attribute'
+    source_fields = ['name', 'create_variant']
+    matching_keys = ['name']
+
+    def transform(self, record, is_update=False):
+        values = {'name': record.get('name') or 'Unknown'}
+        create_variant = record.get('create_variant')
+        if create_variant in ('always', 'dynamic', 'no_variant'):
+            values['create_variant'] = create_variant
+        return values, None
+
+
+@register_migrator('product_attribute_value')
+class ProductAttributeValueMigrator(BaseMigrator):
+    source_model = 'product.attribute.value'
+    target_model = 'product.attribute.value'
+    source_fields = ['name', 'attribute_id']
+    matching_keys = []  # find_business_match is overridden below (scoped to attribute)
+
+    def transform(self, record, is_update=False):
+        attribute_id, missing = self.resolve_m2o('product.attribute', record.get('attribute_id'))
+        if missing:
+            return {}, missing
+        values = {'name': record.get('name') or 'Unknown'}
+        if attribute_id:
+            values['attribute_id'] = attribute_id
+        return values, None
+
+    def find_business_match(self, values):
+        """A value's name is only unique within its own attribute (e.g.
+        "M" exists under both "Size" and some other attribute) - never
+        match on name alone."""
+        Target = self.env[self.target_model]
+        name = values.get('name')
+        attribute_id = values.get('attribute_id')
+        if not name or not attribute_id:
+            return Target.browse(), None, None
+        found = Target.search([('name', '=', name), ('attribute_id', '=', attribute_id)], limit=2)
+        if len(found) != 1:
+            return Target.browse(), None, None
+        if self._is_target_claimed(found.id):
+            return Target.browse(), None, (
+                'Business-key match on "name+attribute" ignored - already linked '
+                'to a different source record; created as a new record instead.')
+        return found, 'name+attribute', None
+
+
 @register_migrator('product_template')
 class ProductTemplateMigrator(BaseMigrator):
     source_model = 'product.template'
@@ -126,7 +176,9 @@ class ProductTemplateMigrator(BaseMigrator):
     source_fields = [
         'name', 'default_code', 'barcode', 'type', 'sale_ok', 'purchase_ok',
         'list_price', 'standard_price', 'categ_id', 'uom_id', 'uom_po_id',
-        'description_sale', 'product_variant_id',
+        'description_sale', 'description_purchase', 'weight', 'volume',
+        'image_1920', 'product_tag_ids', 'attribute_line_ids',
+        'product_variant_id', 'product_variant_ids',
     ]
     matching_keys = ['default_code', 'barcode']
 
@@ -140,6 +192,10 @@ class ProductTemplateMigrator(BaseMigrator):
             'list_price': record.get('list_price') or 0.0,
             'standard_price': record.get('standard_price') or 0.0,
             'description_sale': record.get('description_sale') or False,
+            'description_purchase': record.get('description_purchase') or False,
+            'weight': record.get('weight') or 0.0,
+            'volume': record.get('volume') or 0.0,
+            'image_1920': record.get('image_1920') or False,
         }
         # 'type' (goods/service/combo) selection values have changed across
         # Odoo versions - copy only if the target still accepts it.
@@ -164,23 +220,106 @@ class ProductTemplateMigrator(BaseMigrator):
             if uom_po_id:
                 values['uom_po_id'] = uom_po_id
 
+        tag_ids = record.get('product_tag_ids')
+        if tag_ids:
+            values['product_tag_ids'] = [(6, 0, self.resolve_or_create_m2m_by_name(
+                'product.tag', tag_ids, 'product.tag', '_tag_cache'))]
+
+        # Variant attributes (Color, Size, ...) are only set up on first
+        # create - Odoo auto-generates the product.product variants for
+        # every combination from this. Re-syncing attribute lines on an
+        # already-migrated template is out of scope for V1 (documented
+        # limitation, same reasoning as sale/purchase order lines).
+        if not is_update:
+            lines, missing = self._build_attribute_lines(record)
+            if missing:
+                return values, missing
+            if lines:
+                values['attribute_line_ids'] = lines
+
         return values, None
 
+    def _build_attribute_lines(self, record):
+        line_ids = record.get('attribute_line_ids') or []
+        if not line_ids:
+            return [], None
+        lines = self.adapter.read(
+            'product.template.attribute.line', line_ids, fields=['attribute_id', 'value_ids'])
+        commands = []
+        for line in lines:
+            attribute_id, missing = self.resolve_m2o('product.attribute', line.get('attribute_id'))
+            if missing:
+                return None, missing
+            value_ids, missing = self.resolve_m2m(
+                'product.attribute.value', line.get('value_ids') or [])
+            if missing:
+                return None, missing
+            if attribute_id and value_ids:
+                commands.append((0, 0, {
+                    'attribute_id': attribute_id,
+                    'value_ids': [(6, 0, value_ids)],
+                }))
+        return commands, None
+
     def _after_write(self, record, target_id):
-        # A template without variant attributes has exactly one auto-created
-        # product.product ("variant"). Map it too so sale/purchase order
-        # lines (which reference product.product, not product.template) can
-        # resolve it. Multi-variant products are a known V1 limitation.
-        source_variant = record.get('product_variant_id')
-        if not source_variant:
+        """Map every source product.product variant onto the matching
+        auto-generated target variant, identified by comparing their
+        (attribute, value) combinations - not by list position, which can
+        differ between databases."""
+        source_variant_ids = record.get('product_variant_ids') or []
+        if not source_variant_ids:
             return
-        source_variant_id = source_variant[0] if isinstance(source_variant, (list, tuple)) else source_variant
+
         target_template = self.env[self.target_model].browse(target_id)
-        target_variant_id = target_template.product_variant_id.id
-        if target_variant_id:
+        target_variants = target_template.product_variant_ids
+
+        if len(source_variant_ids) == 1 and len(target_variants) == 1:
             self.Mapping.set_mapping(
-                self.connection.id, 'product.product', source_variant_id,
-                'product.product', target_variant_id)
+                self.connection.id, 'product.product', source_variant_ids[0],
+                'product.product', target_variants.id)
+            return
+
+        source_variants = self.adapter.read(
+            'product.product', source_variant_ids,
+            fields=['product_template_attribute_value_ids'])
+        all_ptav_ids = set()
+        for variant in source_variants:
+            all_ptav_ids.update(variant.get('product_template_attribute_value_ids') or [])
+
+        ptav_by_id = {}
+        if all_ptav_ids:
+            for ptav in self.adapter.read(
+                    'product.template.attribute.value', list(all_ptav_ids),
+                    fields=['attribute_id', 'product_attribute_value_id']):
+                ptav_by_id[ptav['id']] = ptav
+
+        def source_signature(ptav_ids):
+            sig = []
+            for ptav_id in ptav_ids:
+                ptav = ptav_by_id.get(ptav_id)
+                if not ptav:
+                    continue
+                attr_id, _ = self.resolve_m2o('product.attribute', ptav.get('attribute_id'))
+                val_id, _ = self.resolve_m2o(
+                    'product.attribute.value', ptav.get('product_attribute_value_id'))
+                if attr_id and val_id:
+                    sig.append((attr_id, val_id))
+            return frozenset(sig)
+
+        target_by_signature = {}
+        for tv in target_variants:
+            sig = frozenset(
+                (ptav.attribute_id.id, ptav.product_attribute_value_id.id)
+                for ptav in tv.product_template_attribute_value_ids)
+            target_by_signature[sig] = tv.id
+
+        for variant in source_variants:
+            sig = source_signature(variant.get('product_template_attribute_value_ids') or [])
+            target_variant_id = target_by_signature.get(sig)
+            if target_variant_id:
+                self.Mapping.set_mapping(
+                    self.connection.id, 'product.product', variant['id'],
+                    'product.product', target_variant_id)
 
 
 @register_migrator('crm_lead')

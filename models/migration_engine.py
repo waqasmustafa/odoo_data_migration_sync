@@ -9,6 +9,8 @@ _logger = logging.getLogger(__name__)
 MIGRATION_ORDER = [
     'res_partner',
     'product_category',
+    'product_attribute',
+    'product_attribute_value',
     'product_template',
     'crm_lead',
     'sale_order',
@@ -72,6 +74,19 @@ class BaseMigrator:
     def _after_write(self, record, target_id):
         """Hook for subclasses that need to register extra mappings
         (e.g. a product template's auto-created variant)."""
+
+    def _safe_after_write(self, record, target_id):
+        """Runs _after_write() without letting a failure there mark the
+        main record as an error - the primary record was already
+        successfully created/updated at this point; only a secondary
+        enhancement (e.g. variant mapping) would be lost."""
+        try:
+            self._after_write(record, target_id)
+        except Exception:
+            _logger.exception(
+                '_after_write hook failed for %s#%s (target %s) - '
+                'the main record was still saved.',
+                self.source_model, record.get('id'), target_id)
 
     # ---- relation helpers available to subclasses ----
     def resolve_m2o(self, source_comodel, value):
@@ -220,15 +235,35 @@ class BaseMigrator:
             return list(only_source_ids)
         return self.adapter.search(self.source_model, self.get_domain())
 
+    def _get_source_fields(self):
+        """self.source_fields filtered down to fields that actually exist
+        on this particular source database. A field can be missing/renamed
+        on an older or newer Odoo version (e.g. product.template.type
+        changed across 16/17/18) - without this guard, one unknown field
+        name would make the whole batch read fail instead of just that
+        one field being skipped."""
+        cache = getattr(self, '_available_fields_cache', None)
+        if cache is not None:
+            return cache
+        try:
+            available = self.adapter.fields_get(self.source_model, attributes=[])
+        except Exception:  # noqa: BLE001 - fall back to the declared list
+            available = None
+        fields = list(self.source_fields) if available is None else [
+            f for f in self.source_fields if f in available]
+        self._available_fields_cache = fields
+        return fields
+
     def run_pass(self, only_source_ids=None):
         """Process one pass over the source ids. Returns the list of source
         ids that hit a missing dependency, so the runner can retry them
         once earlier migrators/passes have produced more mappings."""
         ids = self.fetch_source_ids(only_source_ids)
         pending = []
+        read_fields = self._get_source_fields()
 
         for batch in chunked(ids, self.batch_size):
-            records = self.adapter.read(self.source_model, batch, fields=self.source_fields)
+            records = self.adapter.read(self.source_model, batch, fields=read_fields)
             counts = {'created': 0, 'updated': 0, 'matched': 0, 'skipped': 0, 'error': 0}
             line_vals = []
             for record in records:
@@ -266,7 +301,7 @@ class BaseMigrator:
                         target_id=existing_target_id))
                     return
                 Target.browse(existing_target_id).write(values)
-                self._after_write(record, existing_target_id)
+                self._safe_after_write(record, existing_target_id)
                 counts['updated'] += 1
                 line_vals.append(self._line_vals(source_id, 'updated', note, target_id=existing_target_id))
             else:
@@ -300,7 +335,7 @@ class BaseMigrator:
                     if stripped:
                         note = 'Dropped self-referential field(s): %s' % ', '.join(stripped)
                     match.write(values)
-                self._after_write(record, match.id)
+                self._safe_after_write(record, match.id)
             counts['matched'] += 1
             line_vals.append(self._line_vals(source_id, 'matched', note, target_id=match.id))
             return
@@ -314,7 +349,7 @@ class BaseMigrator:
         new_record = Target.create(values)
         self.Mapping.set_mapping(
             self.connection.id, self.source_model, source_id, self.target_model, new_record.id)
-        self._after_write(record, new_record.id)
+        self._safe_after_write(record, new_record.id)
         counts['created'] += 1
         line_vals.append(self._line_vals(source_id, 'created', rejected_note, target_id=new_record.id))
 
