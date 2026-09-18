@@ -184,6 +184,32 @@ class BaseMigrator:
         cache[source_user_id] = target_id
         return target_id
 
+    def resolve_taxes(self, source_tax_ids, type_tax_use, cache_attr='_tax_cache'):
+        """Resolve account.tax ids by (name, amount, type_tax_use) - a tax
+        is enhancement data for a line, never worth blocking the whole
+        order over, so unmatched taxes are silently dropped rather than
+        treated as a missing dependency."""
+        if not source_tax_ids:
+            return []
+        cache = getattr(self, cache_attr, None)
+        if cache is None:
+            cache = {}
+            setattr(self, cache_attr, cache)
+
+        uncached = [tid for tid in source_tax_ids if tid not in cache]
+        if uncached:
+            for tax in self.adapter.read(
+                    'account.tax', uncached, fields=['name', 'amount', 'type_tax_use']):
+                domain = [
+                    ('name', '=', tax.get('name')),
+                    ('amount', '=', tax.get('amount')),
+                    ('type_tax_use', '=', type_tax_use),
+                ]
+                found = self.env['account.tax'].search(domain, limit=2)
+                cache[tax['id']] = found.id if len(found) == 1 else False
+
+        return [cache[tid] for tid in source_tax_ids if cache.get(tid)]
+
     def find_business_match(self, values):
         """Returns (match_record_or_empty, matched_key_or_None, rejected_note_or_None).
 
@@ -235,24 +261,28 @@ class BaseMigrator:
             return list(only_source_ids)
         return self.adapter.search(self.source_model, self.get_domain())
 
-    def _get_source_fields(self):
-        """self.source_fields filtered down to fields that actually exist
-        on this particular source database. A field can be missing/renamed
-        on an older or newer Odoo version (e.g. product.template.type
-        changed across 16/17/18) - without this guard, one unknown field
-        name would make the whole batch read fail instead of just that
-        one field being skipped."""
-        cache = getattr(self, '_available_fields_cache', None)
+    def _filter_available_fields(self, model, fields, cache_attr):
+        """fields filtered down to those that actually exist on `model` in
+        this particular source database. A field can be missing/renamed on
+        an older or newer Odoo version (e.g. product.template.type changed
+        across 16/17/18, or sale.order.line vs purchase.order.line using
+        different tax field names) - without this guard, one unknown field
+        name would make the whole batch read fail instead of just that one
+        field being skipped."""
+        cache = getattr(self, cache_attr, None)
         if cache is not None:
             return cache
         try:
-            available = self.adapter.fields_get(self.source_model, attributes=[])
+            available = self.adapter.fields_get(model, attributes=[])
         except Exception:  # noqa: BLE001 - fall back to the declared list
             available = None
-        fields = list(self.source_fields) if available is None else [
-            f for f in self.source_fields if f in available]
-        self._available_fields_cache = fields
-        return fields
+        result = list(fields) if available is None else [f for f in fields if f in available]
+        setattr(self, cache_attr, result)
+        return result
+
+    def _get_source_fields(self):
+        return self._filter_available_fields(
+            self.source_model, self.source_fields, '_available_fields_cache')
 
     def run_pass(self, only_source_ids=None):
         """Process one pass over the source ids. Returns the list of source

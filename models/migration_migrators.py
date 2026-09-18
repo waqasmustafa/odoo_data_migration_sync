@@ -432,7 +432,8 @@ class CrmLeadMigrator(_AddressMixin, BaseMigrator):
 
 
 class _OrderMigratorMixin:
-    """Shared line-building logic for sale.order and purchase.order.
+    """Shared line-building and header-resolution logic for sale.order and
+    purchase.order.
 
     Lines are only (re)written the first time an order is created - once a
     mapping exists, later runs only update header fields. Re-syncing lines
@@ -443,12 +444,19 @@ class _OrderMigratorMixin:
     line_field = None
     qty_field = None
     line_source_fields = []
+    tax_field = None       # 'tax_id' on sale.order.line, 'taxes_id' on purchase.order.line
+    tax_type_use = None    # 'sale' or 'purchase' - scopes account.tax matching
 
     def _build_lines(self, order_record):
         line_ids = order_record.get(self.line_field) or []
         if not line_ids:
             return [], None
-        lines = self.adapter.read(self.line_model, line_ids, fields=self.line_source_fields)
+        wanted_fields = list(self.line_source_fields)
+        if self.tax_field:
+            wanted_fields.append(self.tax_field)
+        available_fields = self._filter_available_fields(
+            self.line_model, wanted_fields, '_line_fields_cache')
+        lines = self.adapter.read(self.line_model, line_ids, fields=available_fields)
         commands = []
         for line in lines:
             product_id, missing = self.resolve_m2o('product.product', line.get('product_id'))
@@ -461,6 +469,8 @@ class _OrderMigratorMixin:
             }
             if line.get('discount'):
                 line_vals['discount'] = line['discount']
+            if line.get('sequence') is not None:
+                line_vals['sequence'] = line['sequence']
             if product_id:
                 line_vals['product_id'] = product_id
             uom = line.get('product_uom')
@@ -468,20 +478,53 @@ class _OrderMigratorMixin:
                 uom_id = self.resolve_by_name('uom.uom', uom[1], '_uom_cache')
                 if uom_id:
                     line_vals['product_uom'] = uom_id
+            if self.tax_field and line.get(self.tax_field):
+                tax_ids = self.resolve_taxes(line[self.tax_field], self.tax_type_use)
+                if tax_ids:
+                    line_vals[self.tax_field] = [(6, 0, tax_ids)]
             commands.append((0, 0, line_vals))
         return commands, None
+
+    def _resolve_currency(self, currency_field):
+        if not currency_field:
+            return False
+        source_id = currency_field[0]
+        cache = getattr(self, '_currency_cache', None)
+        if cache is None:
+            cache = {}
+            self._currency_cache = cache
+        if source_id in cache:
+            return cache[source_id]
+        recs = self.adapter.read('res.currency', [source_id], fields=['name'])
+        code = recs[0].get('name') if recs else None
+        target_id = self.resolve_by_name('res.currency', code, '_currency_by_code_cache') if code else False
+        cache[source_id] = target_id
+        return target_id
 
 
 @register_migrator('sale_order')
 class SaleOrderMigrator(_OrderMigratorMixin, BaseMigrator):
     source_model = 'sale.order'
     target_model = 'sale.order'
-    source_fields = ['name', 'partner_id', 'date_order', 'client_order_ref', 'order_line']
+    source_fields = [
+        'name', 'partner_id', 'date_order', 'client_order_ref', 'order_line',
+        'state', 'validity_date', 'commitment_date', 'payment_term_id',
+        'pricelist_id', 'currency_id', 'user_id', 'team_id', 'note',
+    ]
     matching_keys = []
     line_model = 'sale.order.line'
     line_field = 'order_line'
     qty_field = 'product_uom_qty'
-    line_source_fields = ['product_id', 'name', 'product_uom_qty', 'product_uom', 'price_unit', 'discount']
+    line_source_fields = ['product_id', 'name', 'product_uom_qty', 'product_uom',
+                           'price_unit', 'discount', 'sequence']
+    tax_field = 'tax_id'
+    tax_type_use = 'sale'
+
+    # 'done' (locked) was folded into state='sale' + a separate 'locked'
+    # boolean on newer Odoo versions - map it down rather than risk an
+    # invalid-selection-value error on the target.
+    _STATE_MAP = {'draft': 'draft', 'sent': 'sent', 'sale': 'sale',
+                  'done': 'sale', 'cancel': 'cancel'}
 
     def transform(self, record, is_update=False):
         partner_id, missing = self.resolve_m2o('res.partner', record.get('partner_id'))
@@ -491,7 +534,41 @@ class SaleOrderMigrator(_OrderMigratorMixin, BaseMigrator):
             'partner_id': partner_id,
             'date_order': record.get('date_order') or False,
             'client_order_ref': record.get('client_order_ref') or False,
+            'validity_date': record.get('validity_date') or False,
+            'commitment_date': record.get('commitment_date') or False,
+            'note': record.get('note') or False,
         }
+
+        state = self._STATE_MAP.get(record.get('state'))
+        if state:
+            values['state'] = state
+
+        payment_term = record.get('payment_term_id')
+        if payment_term:
+            pt_id = self.resolve_by_name('account.payment.term', payment_term[1], '_payment_term_cache')
+            if pt_id:
+                values['payment_term_id'] = pt_id
+
+        pricelist = record.get('pricelist_id')
+        if pricelist:
+            pl_id = self.resolve_by_name('product.pricelist', pricelist[1], '_pricelist_cache')
+            if pl_id:
+                values['pricelist_id'] = pl_id
+
+        currency_id = self._resolve_currency(record.get('currency_id'))
+        if currency_id:
+            values['currency_id'] = currency_id
+
+        user_id = self.resolve_user(record.get('user_id'))
+        if user_id:
+            values['user_id'] = user_id
+
+        team = record.get('team_id')
+        if team:
+            team_id = self.resolve_by_name('crm.team', team[1], '_team_cache')
+            if team_id:
+                values['team_id'] = team_id
+
         if not is_update:
             lines, missing = self._build_lines(record)
             if missing:
@@ -504,12 +581,24 @@ class SaleOrderMigrator(_OrderMigratorMixin, BaseMigrator):
 class PurchaseOrderMigrator(_OrderMigratorMixin, BaseMigrator):
     source_model = 'purchase.order'
     target_model = 'purchase.order'
-    source_fields = ['name', 'partner_id', 'date_order', 'partner_ref', 'order_line']
+    source_fields = [
+        'name', 'partner_id', 'date_order', 'partner_ref', 'order_line',
+        'state', 'date_planned', 'payment_term_id', 'currency_id',
+        'user_id', 'notes',
+    ]
     matching_keys = []
     line_model = 'purchase.order.line'
     line_field = 'order_line'
     qty_field = 'product_qty'
-    line_source_fields = ['product_id', 'name', 'product_qty', 'product_uom', 'price_unit']
+    line_source_fields = ['product_id', 'name', 'product_qty', 'product_uom',
+                           'price_unit', 'sequence']
+    tax_field = 'taxes_id'
+    tax_type_use = 'purchase'
+
+    # 'done'/'purchase' variants across versions all collapse onto the
+    # confirmed state; only copy values the target is known to accept.
+    _STATE_MAP = {'draft': 'draft', 'sent': 'sent', 'to approve': 'to approve',
+                  'purchase': 'purchase', 'done': 'purchase', 'cancel': 'cancel'}
 
     def transform(self, record, is_update=False):
         partner_id, missing = self.resolve_m2o('res.partner', record.get('partner_id'))
@@ -519,7 +608,28 @@ class PurchaseOrderMigrator(_OrderMigratorMixin, BaseMigrator):
             'partner_id': partner_id,
             'date_order': record.get('date_order') or False,
             'partner_ref': record.get('partner_ref') or False,
+            'date_planned': record.get('date_planned') or False,
+            'notes': record.get('notes') or False,
         }
+
+        state = self._STATE_MAP.get(record.get('state'))
+        if state:
+            values['state'] = state
+
+        payment_term = record.get('payment_term_id')
+        if payment_term:
+            pt_id = self.resolve_by_name('account.payment.term', payment_term[1], '_payment_term_cache')
+            if pt_id:
+                values['payment_term_id'] = pt_id
+
+        currency_id = self._resolve_currency(record.get('currency_id'))
+        if currency_id:
+            values['currency_id'] = currency_id
+
+        user_id = self.resolve_user(record.get('user_id'))
+        if user_id:
+            values['user_id'] = user_id
+
         if not is_update:
             lines, missing = self._build_lines(record)
             if missing:
