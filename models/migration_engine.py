@@ -108,15 +108,38 @@ class BaseMigrator:
         return cache[name]
 
     def find_business_match(self, values):
+        """Returns (match_record_or_empty, matched_key_or_None, rejected_note_or_None).
+
+        A business-key hit is only trusted if the matched target record is
+        not already linked to a *different* source record in this same
+        connection. Without this guard, several genuinely distinct source
+        records that happen to share a value (e.g. several department
+        contacts all using the company's generic email) would silently
+        collapse onto a single target record instead of getting their own.
+        """
         Target = self.env[self.target_model]
         for key in self.matching_keys:
             value = values.get(key)
             if not value:
                 continue
             found = Target.search([(key, '=', value)], limit=2)
-            if len(found) == 1:
-                return found
-        return Target.browse()
+            if len(found) != 1:
+                continue
+            if self._is_target_claimed(found.id):
+                return Target.browse(), None, (
+                    'Business-key match on "%s" ignored - that target record is '
+                    'already linked to a different source record; created as '
+                    'a new record instead.' % key)
+            return found, key, None
+        return Target.browse(), None, None
+
+    def _is_target_claimed(self, target_id):
+        return bool(self.Mapping.search([
+            ('connection_id', '=', self.connection.id),
+            ('source_model', '=', self.source_model),
+            ('target_model', '=', self.target_model),
+            ('target_res_id', '=', target_id),
+        ], limit=1))
 
     def _guard_self_reference(self, values, target_id):
         """Drop any self-referential field that would point a record at
@@ -204,7 +227,7 @@ class BaseMigrator:
                 source_id, 'skipped', 'No existing target record (update-only mode)'))
             return
 
-        match = self.find_business_match(values)
+        match, _matched_key, rejected_note = self.find_business_match(values)
         if match:
             note = None
             if not self.run.dry_run:
@@ -222,7 +245,8 @@ class BaseMigrator:
 
         if self.run.dry_run:
             counts['created'] += 1
-            line_vals.append(self._line_vals(source_id, 'created', 'Dry run - not written'))
+            message = ('%s (dry run - not written)' % rejected_note) if rejected_note else 'Dry run - not written'
+            line_vals.append(self._line_vals(source_id, 'created', message))
             return
 
         new_record = Target.create(values)
@@ -230,7 +254,7 @@ class BaseMigrator:
             self.connection.id, self.source_model, source_id, self.target_model, new_record.id)
         self._after_write(record, new_record.id)
         counts['created'] += 1
-        line_vals.append(self._line_vals(source_id, 'created', target_id=new_record.id))
+        line_vals.append(self._line_vals(source_id, 'created', rejected_note, target_id=new_record.id))
 
     def _line_vals(self, source_id, state, message=None, missing_dependency=None, target_id=None):
         return {

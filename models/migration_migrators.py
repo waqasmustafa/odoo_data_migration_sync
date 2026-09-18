@@ -8,7 +8,7 @@ class ResPartnerMigrator(BaseMigrator):
     source_fields = [
         'name', 'is_company', 'company_type', 'street', 'street2', 'city',
         'zip', 'phone', 'mobile', 'email', 'website', 'vat', 'ref',
-        'function', 'lang', 'parent_id',
+        'function', 'lang', 'parent_id', 'country_id', 'state_id', 'title',
     ]
     matching_keys = ['ref', 'vat', 'email']
     self_referential_fields = ['parent_id']
@@ -36,7 +36,42 @@ class ResPartnerMigrator(BaseMigrator):
             return values, missing
         if parent_id:
             values['parent_id'] = parent_id
+
+        country = record.get('country_id')
+        country_id = False
+        if country:
+            country_id = self.resolve_by_name('res.country', country[1], '_country_cache')
+            if country_id:
+                values['country_id'] = country_id
+
+        state = record.get('state_id')
+        if state:
+            state_id = self._resolve_state(state[1], country_id)
+            if state_id:
+                values['state_id'] = state_id
+
+        title = record.get('title')
+        if title:
+            title_id = self.resolve_by_name('res.partner.title', title[1], '_title_cache')
+            if title_id:
+                values['title'] = title_id
+
         return values, None
+
+    def _resolve_state(self, name, country_id):
+        cache = getattr(self, '_state_cache', None)
+        if cache is None:
+            cache = {}
+            self._state_cache = cache
+        cache_key = (name, country_id)
+        if cache_key in cache:
+            return cache[cache_key]
+        domain = [('name', '=', name)]
+        if country_id:
+            domain.append(('country_id', '=', country_id))
+        rec = self.env['res.country.state'].search(domain, limit=1)
+        cache[cache_key] = rec.id if rec else False
+        return cache[cache_key]
 
 
 @register_migrator('product_category')
@@ -44,7 +79,7 @@ class ProductCategoryMigrator(BaseMigrator):
     source_model = 'product.category'
     target_model = 'product.category'
     source_fields = ['name', 'parent_id']
-    matching_keys = ['name']
+    matching_keys = ['name']  # unused directly - find_business_match is overridden below
     self_referential_fields = ['parent_id']
 
     def transform(self, record, is_update=False):
@@ -55,6 +90,25 @@ class ProductCategoryMigrator(BaseMigrator):
         if parent_id:
             values['parent_id'] = parent_id
         return values, None
+
+    def find_business_match(self, values):
+        """Match on name scoped to the (already-resolved) parent category,
+        not on name alone - two different categories under different
+        parents (e.g. "Accessories" under both "Electronics" and
+        "Furniture") must never be treated as the same record."""
+        Target = self.env[self.target_model]
+        name = values.get('name')
+        if not name:
+            return Target.browse(), None, None
+        domain = [('name', '=', name), ('parent_id', '=', values.get('parent_id') or False)]
+        found = Target.search(domain, limit=2)
+        if len(found) != 1:
+            return Target.browse(), None, None
+        if self._is_target_claimed(found.id):
+            return Target.browse(), None, (
+                'Business-key match on "name+parent" ignored - already linked to '
+                'a different source record; created as a new record instead.')
+        return found, 'name+parent', None
 
 
 @register_migrator('product_template')
