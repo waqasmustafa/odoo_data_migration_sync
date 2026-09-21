@@ -16,6 +16,7 @@ class MigrationDashboard(models.TransientModel):
     total_errors = fields.Integer(readonly=True)
     success_rate = fields.Float(readonly=True)
     last_run_id = fields.Many2one('migration.run', readonly=True)
+    recent_run_ids = fields.Many2many('migration.run', string='Recent Runs', readonly=True)
 
     def default_get(self, fields_list):
         values = super().default_get(fields_list)
@@ -38,6 +39,7 @@ class MigrationDashboard(models.TransientModel):
             'total_errors': errors,
             'success_rate': round((created + updated) * 100.0 / total, 1) if total else 0.0,
             'last_run_id': runs[:1].id if runs else False,
+            'recent_run_ids': [(6, 0, runs[:10].ids)],
         })
         return values
 
