@@ -246,6 +246,16 @@ class BaseMigrator:
             ('target_res_id', '=', target_id),
         ], limit=1))
 
+    def _combine_notes(self, dropped, stripped, extra=None):
+        parts = []
+        if dropped:
+            parts.append('Dropped unknown field(s): %s' % ', '.join(dropped))
+        if stripped:
+            parts.append('Dropped self-referential field(s): %s' % ', '.join(stripped))
+        if extra:
+            parts.append(extra)
+        return '; '.join(parts) if parts else None
+
     def _guard_self_reference(self, values, target_id):
         """Drop any self-referential field that would point a record at
         itself (e.g. a contact business-key-matched onto its own parent
@@ -299,6 +309,20 @@ class BaseMigrator:
         return self._filter_available_fields(
             self.source_model, self.source_fields, '_available_fields_cache')
 
+    def _sanitize_values(self, values, model=None):
+        """Drop any key that isn't a real field on OUR target model (or
+        `model`, for a nested line model) before writing. This is checked
+        against our own local model registry, so (unlike the source-side
+        field guards above, which depend on a remote fields_get call) it is
+        always 100% accurate - the final safety net for a target field name
+        that turns out not to exist on this Odoo 18 installation (e.g. a
+        field that was renamed/removed between versions)."""
+        valid_fields = self.env[model or self.target_model]._fields
+        dropped = [key for key in values if key not in valid_fields]
+        for key in dropped:
+            values.pop(key)
+        return dropped
+
     def run_pass(self, only_source_ids=None):
         """Process one pass over the source ids. Returns the list of source
         ids that hit a missing dependency, so the runner can retry them
@@ -336,9 +360,9 @@ class BaseMigrator:
                     line_vals.append(self._line_vals(
                         source_id, 'error', 'Missing dependency', missing, existing_target_id))
                     return
+                dropped = self._sanitize_values(values)
                 stripped = self._guard_self_reference(values, existing_target_id)
-                note = ('Dropped self-referential field(s): %s' % ', '.join(stripped)
-                        if stripped else None)
+                note = self._combine_notes(dropped, stripped)
                 if self.run.dry_run:
                     counts['updated'] += 1
                     line_vals.append(self._line_vals(
@@ -371,23 +395,27 @@ class BaseMigrator:
 
         match, _matched_key, rejected_note = self.find_business_match(values)
         if match:
-            note = None
+            stripped = []
             if not self.run.dry_run:
                 self.Mapping.set_mapping(
                     self.connection.id, self.source_model, source_id, self.target_model, match.id)
                 if self.run.mode == 'create_update':
+                    dropped = self._sanitize_values(values)
                     stripped = self._guard_self_reference(values, match.id)
-                    if stripped:
-                        note = 'Dropped self-referential field(s): %s' % ', '.join(stripped)
+                    stripped = dropped + stripped
                     match.write(values)
                 self._safe_after_write(record, match.id)
             counts['matched'] += 1
-            line_vals.append(self._line_vals(source_id, 'matched', note, target_id=match.id))
+            line_vals.append(self._line_vals(
+                source_id, 'matched', self._combine_notes(stripped, []), target_id=match.id))
             return
+
+        dropped = self._sanitize_values(values)
+        combined_note = self._combine_notes(dropped, [], extra=rejected_note)
 
         if self.run.dry_run:
             counts['created'] += 1
-            message = ('%s (dry run - not written)' % rejected_note) if rejected_note else 'Dry run - not written'
+            message = ('%s (dry run - not written)' % combined_note) if combined_note else 'Dry run - not written'
             line_vals.append(self._line_vals(source_id, 'created', message))
             return
 
@@ -396,7 +424,7 @@ class BaseMigrator:
             self.connection.id, self.source_model, source_id, self.target_model, new_record.id)
         self._safe_after_write(record, new_record.id)
         counts['created'] += 1
-        line_vals.append(self._line_vals(source_id, 'created', rejected_note, target_id=new_record.id))
+        line_vals.append(self._line_vals(source_id, 'created', combined_note, target_id=new_record.id))
 
     def _line_vals(self, source_id, state, message=None, missing_dependency=None, target_id=None):
         return {

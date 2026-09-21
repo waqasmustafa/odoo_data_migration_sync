@@ -498,6 +498,7 @@ class _OrderMigratorMixin:
                 tax_ids = self.resolve_taxes(line[self.tax_field], self.tax_type_use)
                 if tax_ids:
                     line_vals[self.tax_field] = [(6, 0, tax_ids)]
+            self._sanitize_values(line_vals, model=self.line_model)
             commands.append((0, 0, line_vals))
         return commands, None
 
@@ -607,7 +608,7 @@ class PurchaseOrderMigrator(_OrderMigratorMixin, BaseMigrator):
     line_field = 'order_line'
     qty_field = 'product_qty'
     line_source_fields = ['product_id', 'name', 'product_qty', 'product_uom',
-                           'price_unit', 'sequence']
+                           'price_unit', 'discount', 'sequence']
     tax_field = 'taxes_id'
     tax_type_use = 'purchase'
 
