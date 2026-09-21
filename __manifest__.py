@@ -15,7 +15,10 @@ on this database before their data can be migrated.
 """,
     'author': 'Waqas Mustafa',
     'license': 'OPL-1',
-    'depends': ['base', 'product', 'crm', 'sale', 'purchase', 'hr', 'stock', 'project'],
+    'depends': [
+        'base', 'product', 'crm', 'sale', 'purchase', 'hr', 'stock', 'project',
+        'hr_holidays', 'hr_timesheet',
+    ],
     'data': [
         'security/ir.model.access.csv',
         'views/migration_connection_views.xml',

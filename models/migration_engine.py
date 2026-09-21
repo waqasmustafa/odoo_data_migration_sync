@@ -16,13 +16,17 @@ MIGRATION_ORDER = [
     'product_template',
     'hr_department',
     'hr_employee',
+    'hr_leave_type',
+    'hr_leave',
     'stock_warehouse',
     'stock_location',
     'crm_lead',
     'project_project',
     'project_task',
+    'timesheet',
     'sale_order',
     'purchase_order',
+    'pos_order',
 ]
 
 MIGRATOR_REGISTRY = {}

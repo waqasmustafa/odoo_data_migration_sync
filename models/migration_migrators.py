@@ -543,6 +543,61 @@ class HrEmployeeMigrator(BaseMigrator):
         return values, missing
 
 
+@register_migrator('hr_leave_type')
+class HrLeaveTypeMigrator(BaseMigrator):
+    source_model = 'hr.leave.type'
+    target_model = 'hr.leave.type'
+    source_fields = ['name']
+    matching_keys = ['name']
+
+    def transform(self, record, is_update=False):
+        return {'name': record.get('name') or 'Unknown'}, None
+
+
+@register_migrator('hr_leave')
+class HrLeaveMigrator(BaseMigrator):
+    source_model = 'hr.leave'
+    target_model = 'hr.leave'
+    source_fields = [
+        'employee_id', 'holiday_status_id', 'date_from', 'date_to',
+        'number_of_days', 'state', 'private_name',
+    ]
+    matching_keys = []
+    # Refused/cancelled leave requests are still real history - include them.
+    domain = [('state', 'in', ['draft', 'confirm', 'validate', 'validate1', 'refuse', 'cancel'])]
+
+    # Older versions expose fewer states ('validate1' is a two-step-approval
+    # addition) - only copy a state the target is known to accept.
+    _STATE_MAP = {'draft': 'draft', 'confirm': 'confirm', 'validate': 'validate',
+                  'validate1': 'validate', 'refuse': 'refuse', 'cancel': 'cancel'}
+
+    def transform(self, record, is_update=False):
+        employee_id, missing = self.resolve_m2o('hr.employee', record.get('employee_id'))
+        if missing:
+            return {}, missing
+
+        leave_type = record.get('holiday_status_id')
+        if not leave_type:
+            return {}, 'hr.leave.type:not set on source record'
+        leave_type_id, missing = self.resolve_m2o('hr.leave.type', leave_type)
+        if missing:
+            return {}, missing
+
+        values = {
+            'employee_id': employee_id,
+            'holiday_status_id': leave_type_id,
+            'date_from': record.get('date_from') or False,
+            'date_to': record.get('date_to') or False,
+            'private_name': record.get('private_name') or False,
+        }
+        if record.get('number_of_days'):
+            values['number_of_days'] = record['number_of_days']
+        state = self._STATE_MAP.get(record.get('state'))
+        if state:
+            values['state'] = state
+        return values, None
+
+
 @register_migrator('stock_warehouse')
 class StockWarehouseMigrator(BaseMigrator):
     source_model = 'stock.warehouse'
@@ -696,6 +751,44 @@ class ProjectTaskMigrator(BaseMigrator):
             if target_id:
                 resolved.append(target_id)
         return resolved
+
+
+@register_migrator('timesheet')
+class TimesheetMigrator(BaseMigrator):
+    """Timesheets live on account.analytic.line, the same generic model
+    used for other costing entries - the domain restricts this migrator to
+    rows that actually carry a project (i.e. real timesheet entries)."""
+    source_model = 'account.analytic.line'
+    target_model = 'account.analytic.line'
+    source_fields = ['name', 'date', 'unit_amount', 'employee_id', 'project_id', 'task_id']
+    matching_keys = []
+    domain = [('project_id', '!=', False)]
+
+    def transform(self, record, is_update=False):
+        project_id, missing = self.resolve_m2o('project.project', record.get('project_id'))
+        if missing:
+            return {}, missing
+        employee_id, missing = self.resolve_m2o('hr.employee', record.get('employee_id'))
+        if missing:
+            return {}, missing
+
+        values = {
+            'name': record.get('name') or '/',
+            'date': record.get('date') or False,
+            'unit_amount': record.get('unit_amount') or 0.0,
+            'project_id': project_id,
+            'employee_id': employee_id,
+        }
+
+        task = record.get('task_id')
+        if task:
+            task_id, task_missing = self.resolve_m2o('project.task', task)
+            if task_id:
+                values['task_id'] = task_id
+            # A timesheet entry without its exact task is still meaningful
+            # (it stays logged against the project) - never block on it.
+
+        return values, None
 
 
 class _OrderMigratorMixin:
@@ -904,3 +997,126 @@ class PurchaseOrderMigrator(_OrderMigratorMixin, BaseMigrator):
                 return values, missing
             values['order_line'] = lines
         return values, None
+
+
+@register_migrator('pos_order')
+class PosOrderMigrator(BaseMigrator):
+    """Point of Sale orders - header + lines only.
+
+    Two deliberate scope limits: (1) payment-method breakdown
+    (pos.payment - cash/card split) is not migrated, only the order and
+    its product lines; totals are left for Odoo to (re)compute from the
+    migrated lines rather than writing computed fields directly. (2) Every
+    POS order belongs to a session, which belongs to a POS Shop
+    (pos.config); we never auto-create a POS Shop (it needs payment
+    methods, a pricelist, etc. that cannot be safely guessed), so a shop
+    with the same name must already exist and be configured on the
+    target. Orders from an unmatched shop are skipped with a clear error,
+    not silently dropped. All matched orders for one shop are filed under
+    a single dedicated "Migrated Orders" (closed) session, created once.
+    """
+    source_model = 'pos.order'
+    target_model = 'pos.order'
+    source_fields = ['date_order', 'partner_id', 'state', 'session_id', 'lines']
+    matching_keys = []
+    # Only completed transactions - an abandoned/ongoing cart isn't a real sale.
+    domain = [('state', 'in', ['paid', 'done', 'invoiced', 'cancel'])]
+
+    _STATE_MAP = {'paid': 'paid', 'done': 'done', 'invoiced': 'invoiced', 'cancel': 'cancel'}
+
+    def transform(self, record, is_update=False):
+        session_id = self._resolve_target_session(record.get('session_id'))
+        if not session_id:
+            return {}, 'pos.config:shop not found/configured on target for this order'
+
+        values = {
+            'date_order': record.get('date_order') or False,
+            'session_id': session_id,
+        }
+        partner_id, _missing = self.resolve_m2o('res.partner', record.get('partner_id'))
+        if partner_id:
+            values['partner_id'] = partner_id
+
+        state = self._STATE_MAP.get(record.get('state'))
+        if state:
+            values['state'] = state
+
+        if not is_update:
+            lines, missing = self._build_lines(record)
+            if missing:
+                return values, missing
+            values['lines'] = lines
+
+        return values, None
+
+    def _build_lines(self, order_record):
+        line_ids = order_record.get('lines') or []
+        if not line_ids:
+            return [], None
+        fields = self._filter_available_fields(
+            'pos.order.line', ['product_id', 'qty', 'price_unit', 'discount'], '_line_fields_cache')
+        lines = self.adapter.read('pos.order.line', line_ids, fields=fields)
+        commands = []
+        for line in lines:
+            product_id, missing = self.resolve_m2o('product.product', line.get('product_id'))
+            if line.get('product_id') and missing:
+                return None, missing
+            line_vals = {
+                'qty': line.get('qty') or 0.0,
+                'price_unit': line.get('price_unit') or 0.0,
+            }
+            if line.get('discount'):
+                line_vals['discount'] = line['discount']
+            if product_id:
+                line_vals['product_id'] = product_id
+            self._sanitize_values(line_vals, model='pos.order.line')
+            commands.append((0, 0, line_vals))
+        return commands, None
+
+    def _resolve_target_session(self, source_session_field):
+        if not source_session_field:
+            return False
+        source_session_id = source_session_field[0]
+        cache = getattr(self, '_session_cache', None)
+        if cache is None:
+            cache = {}
+            self._session_cache = cache
+        if source_session_id in cache:
+            return cache[source_session_id]
+
+        sessions = self.adapter.read('pos.session', [source_session_id], fields=['config_id'])
+        config = sessions[0].get('config_id') if sessions else None
+        target_session_id = self._get_or_create_migration_session(config[1]) if config else False
+        cache[source_session_id] = target_session_id
+        return target_session_id
+
+    def _get_or_create_migration_session(self, config_name):
+        cache = getattr(self, '_migration_session_by_config', None)
+        if cache is None:
+            cache = {}
+            self._migration_session_by_config = cache
+        if config_name in cache:
+            return cache[config_name]
+
+        target_config = self.env['pos.config'].search([('name', '=', config_name)], limit=1)
+        if not target_config:
+            cache[config_name] = False
+            return False
+
+        # Identify our own session by name, not just any closed session for
+        # this shop - reusing a real historical closed session by accident
+        # would mix migrated orders into genuine past POS activity.
+        session_name = 'Migrated Orders'
+        session = self.env['pos.session'].search([
+            ('config_id', '=', target_config.id),
+            ('name', '=', session_name),
+        ], limit=1)
+        if not session:
+            session = self.env['pos.session'].create({
+                'name': session_name,
+                'config_id': target_config.id,
+                'user_id': self.env.uid,
+                'state': 'closed',
+            })
+        cache[config_name] = session.id
+        return session.id
