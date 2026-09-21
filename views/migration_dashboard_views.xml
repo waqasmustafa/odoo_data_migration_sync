@@ -6,38 +6,115 @@
         <field name="model">migration.dashboard</field>
         <field name="arch" type="xml">
             <form string="Migration Dashboard">
-                <header>
-                    <button name="action_refresh" type="object" string="Refresh" class="btn-secondary"/>
-                </header>
-                <sheet>
-                    <div class="o_settings_container" style="display:flex;gap:16px;flex-wrap:wrap;">
-                        <button name="action_view_connections" type="object" class="oe_stat_button" icon="fa-plug">
-                            <field name="connection_count" widget="statinfo" string="Connections"/>
-                        </button>
-                        <button name="action_view_runs" type="object" class="oe_stat_button" icon="fa-tasks">
-                            <field name="run_count" widget="statinfo" string="Total Runs"/>
-                        </button>
-                        <button name="action_view_runs" type="object" class="oe_stat_button" icon="fa-check-circle">
-                            <field name="run_done_count" widget="statinfo" string="Runs Done"/>
-                        </button>
-                        <button name="action_view_errors" type="object" class="oe_stat_button" icon="fa-exclamation-triangle">
-                            <field name="run_error_count" widget="statinfo" string="Runs Failed"/>
-                        </button>
+                <div style="padding: 24px 32px; max-width: 1200px;">
+
+                    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:20px;">
+                        <h1 style="margin:0; font-weight:600;">Migration Dashboard</h1>
+                        <button name="action_refresh" type="object" string="Refresh"
+                                icon="fa-refresh" class="btn-secondary"/>
                     </div>
-                    <group string="Records">
-                        <group>
-                            <field name="total_created" string="Total Created"/>
-                            <field name="total_updated" string="Total Updated"/>
-                        </group>
-                        <group>
-                            <field name="total_errors" string="Total Errors"/>
-                            <field name="run_running_count" string="Runs In Progress"/>
-                        </group>
-                    </group>
-                    <group string="Last Run">
-                        <field name="last_run_id" readonly="1"/>
-                    </group>
-                </sheet>
+
+                    <!-- KPI cards -->
+                    <div style="display:flex; gap:16px; flex-wrap:wrap; margin-bottom:24px;">
+
+                        <button name="action_view_connections" type="object"
+                                style="flex:1; min-width:180px; text-align:left; border:none; border-radius:10px;
+                                       padding:18px 20px; background:#f0f4ff; border-left:4px solid #5b6fd8; cursor:pointer;">
+                            <div style="font-size:12px; color:#5b6fd8; font-weight:600; text-transform:uppercase; letter-spacing:.03em;">
+                                <i class="fa fa-plug" style="margin-right:6px;"/>Connections
+                            </div>
+                            <div style="font-size:30px; font-weight:700; color:#2b2f45; margin-top:6px;">
+                                <field name="connection_count" nolabel="1"/>
+                            </div>
+                        </button>
+
+                        <button name="action_view_runs" type="object"
+                                style="flex:1; min-width:180px; text-align:left; border:none; border-radius:10px;
+                                       padding:18px 20px; background:#f2f2f7; border-left:4px solid #6b6f7f; cursor:pointer;">
+                            <div style="font-size:12px; color:#6b6f7f; font-weight:600; text-transform:uppercase; letter-spacing:.03em;">
+                                <i class="fa fa-tasks" style="margin-right:6px;"/>Total Runs
+                            </div>
+                            <div style="font-size:30px; font-weight:700; color:#2b2f45; margin-top:6px;">
+                                <field name="run_count" nolabel="1"/>
+                            </div>
+                        </button>
+
+                        <button name="action_view_runs" type="object"
+                                style="flex:1; min-width:180px; text-align:left; border:none; border-radius:10px;
+                                       padding:18px 20px; background:#eefaf1; border-left:4px solid #34a853; cursor:pointer;">
+                            <div style="font-size:12px; color:#248a3d; font-weight:600; text-transform:uppercase; letter-spacing:.03em;">
+                                <i class="fa fa-check-circle" style="margin-right:6px;"/>Runs Done
+                            </div>
+                            <div style="font-size:30px; font-weight:700; color:#2b2f45; margin-top:6px;">
+                                <field name="run_done_count" nolabel="1"/>
+                            </div>
+                        </button>
+
+                        <button name="action_view_errors" type="object"
+                                style="flex:1; min-width:180px; text-align:left; border:none; border-radius:10px;
+                                       padding:18px 20px; background:#fdeeee; border-left:4px solid #e04141; cursor:pointer;">
+                            <div style="font-size:12px; color:#c62828; font-weight:600; text-transform:uppercase; letter-spacing:.03em;">
+                                <i class="fa fa-exclamation-triangle" style="margin-right:6px;"/>Runs Failed
+                            </div>
+                            <div style="font-size:30px; font-weight:700; color:#2b2f45; margin-top:6px;">
+                                <field name="run_error_count" nolabel="1"/>
+                            </div>
+                        </button>
+
+                    </div>
+
+                    <!-- Records summary -->
+                    <div style="font-size:13px; font-weight:600; color:#6b6f7f; text-transform:uppercase;
+                                letter-spacing:.03em; margin-bottom:10px;">Records Migrated (all time)</div>
+                    <div style="display:flex; gap:16px; flex-wrap:wrap; margin-bottom:24px;">
+
+                        <div style="flex:1; min-width:180px; border-radius:10px; padding:18px 20px;
+                                    background:#eefaf1; border-left:4px solid #34a853;">
+                            <div style="font-size:12px; color:#248a3d; font-weight:600; text-transform:uppercase;">Created</div>
+                            <div style="font-size:26px; font-weight:700; color:#2b2f45; margin-top:6px;">
+                                <field name="total_created" nolabel="1"/>
+                            </div>
+                        </div>
+
+                        <div style="flex:1; min-width:180px; border-radius:10px; padding:18px 20px;
+                                    background:#eef3fd; border-left:4px solid #4a80e0;">
+                            <div style="font-size:12px; color:#2f5fbf; font-weight:600; text-transform:uppercase;">Updated</div>
+                            <div style="font-size:26px; font-weight:700; color:#2b2f45; margin-top:6px;">
+                                <field name="total_updated" nolabel="1"/>
+                            </div>
+                        </div>
+
+                        <div style="flex:1; min-width:180px; border-radius:10px; padding:18px 20px;
+                                    background:#fdeeee; border-left:4px solid #e04141;">
+                            <div style="font-size:12px; color:#c62828; font-weight:600; text-transform:uppercase;">Errors</div>
+                            <div style="font-size:26px; font-weight:700; color:#2b2f45; margin-top:6px;">
+                                <field name="total_errors" nolabel="1"/>
+                            </div>
+                        </div>
+
+                        <div style="flex:1; min-width:180px; border-radius:10px; padding:18px 20px;
+                                    background:#fff8ea; border-left:4px solid #e0a83f;">
+                            <div style="font-size:12px; color:#a5761e; font-weight:600; text-transform:uppercase;">Success Rate</div>
+                            <div style="font-size:26px; font-weight:700; color:#2b2f45; margin-top:6px;">
+                                <field name="success_rate" nolabel="1" widget="float" digits="[0,1]"/>%
+                            </div>
+                        </div>
+
+                    </div>
+
+                    <!-- Last run -->
+                    <div style="font-size:13px; font-weight:600; color:#6b6f7f; text-transform:uppercase;
+                                letter-spacing:.03em; margin-bottom:10px;">Last Run</div>
+                    <button name="action_open_last_run" type="object" invisible="not last_run_id"
+                            style="display:block; width:100%; text-align:left; border:1px solid #e3e3e8;
+                                   border-radius:10px; padding:16px 20px; background:#ffffff; cursor:pointer;">
+                        <field name="last_run_id" nolabel="1" readonly="1"/>
+                    </button>
+                    <div invisible="last_run_id" style="color:#8a8d99; padding:8px 0;">
+                        No migration runs yet.
+                    </div>
+
+                </div>
             </form>
         </field>
     </record>
