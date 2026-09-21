@@ -2,6 +2,8 @@ import logging
 
 from odoo import fields as odoo_fields
 
+from .migration_adapter import MigrationConnectionError
+
 _logger = logging.getLogger(__name__)
 
 # Coarse dependency order the doc calls out (section 13): parents before
@@ -259,7 +261,20 @@ class BaseMigrator:
     def fetch_source_ids(self, only_source_ids=None):
         if only_source_ids is not None:
             return list(only_source_ids)
-        return self.adapter.search(self.source_model, self.get_domain())
+        domain = self.get_domain()
+        try:
+            return self.adapter.search(self.source_model, domain)
+        except MigrationConnectionError:
+            if not domain:
+                raise
+            # A domain clause (e.g. an 'active' override) referencing a
+            # field this particular model doesn't have would otherwise
+            # abort the whole migrator. Fall back to no domain rather than
+            # failing outright.
+            _logger.warning(
+                'Domain %s not supported on %s for this source - retrying '
+                'without it.', domain, self.source_model)
+            return self.adapter.search(self.source_model, [])
 
     def _filter_available_fields(self, model, fields, cache_attr):
         """fields filtered down to those that actually exist on `model` in
@@ -442,11 +457,23 @@ class MigrationRunner:
         requested = [k.strip() for k in (self.run.model_keys or '').split(',') if k.strip()]
         ordered = [k for k in MIGRATION_ORDER if k in requested]
         ordered += [k for k in requested if k not in MIGRATION_ORDER]
-        try:
-            for key in ordered:
+        failed_keys = []
+        for key in ordered:
+            try:
                 self.run_migrator(key)
-            self.run.write({'state': 'done', 'end_date': odoo_fields.Datetime.now()})
-        except Exception:
-            _logger.exception('Migration run %s failed', self.run.id)
-            self.run.write({'state': 'error', 'end_date': odoo_fields.Datetime.now()})
-            raise
+            except Exception as exc:  # noqa: BLE001 - one broken migrator must not stop the others
+                _logger.exception('Migrator %s failed in run %s', key, self.run.id)
+                failed_keys.append(key)
+                self.env['migration.run.line'].create({
+                    'run_id': self.run.id,
+                    'model_key': key,
+                    'source_model': key,
+                    'source_res_id': 0,
+                    'state': 'error',
+                    'message': 'Migrator failed entirely: %s' % exc,
+                })
+                self.run.write({'error_count': self.run.error_count + 1})
+        self.run.write({
+            'state': 'error' if failed_keys else 'done',
+            'end_date': odoo_fields.Datetime.now(),
+        })

@@ -37,9 +37,16 @@ class ResPartnerMigrator(_AddressMixin, BaseMigrator):
         'name', 'is_company', 'company_type', 'street', 'street2', 'city',
         'zip', 'phone', 'mobile', 'email', 'website', 'vat', 'ref',
         'function', 'lang', 'parent_id', 'country_id', 'state_id', 'title',
+        'active',
     ]
     matching_keys = ['ref', 'vat', 'email']
     self_referential_fields = ['parent_id']
+    # Without this, a source contact that is archived (e.g. a technical
+    # "Public user" partner used by anonymous website orders) is silently
+    # excluded, and anything referencing it later (a Sales/Purchase Order,
+    # a CRM lead) fails as a missing dependency even though the partner
+    # genuinely exists on the source.
+    domain = [('active', 'in', [True, False])]
 
     def transform(self, record, is_update=False):
         values = {
@@ -47,6 +54,7 @@ class ResPartnerMigrator(_AddressMixin, BaseMigrator):
             'is_company': bool(record.get('is_company')),
             'company_type': record.get('company_type') or (
                 'company' if record.get('is_company') else 'person'),
+            'active': record.get('active', True),
             'street': record.get('street') or False,
             'street2': record.get('street2') or False,
             'city': record.get('city') or False,
@@ -86,12 +94,13 @@ class ResPartnerMigrator(_AddressMixin, BaseMigrator):
 class ProductCategoryMigrator(BaseMigrator):
     source_model = 'product.category'
     target_model = 'product.category'
-    source_fields = ['name', 'parent_id']
+    source_fields = ['name', 'parent_id', 'active']
     matching_keys = ['name']  # unused directly - find_business_match is overridden below
     self_referential_fields = ['parent_id']
+    domain = [('active', 'in', [True, False])]
 
     def transform(self, record, is_update=False):
-        values = {'name': record.get('name') or 'Unknown'}
+        values = {'name': record.get('name') or 'Unknown', 'active': record.get('active', True)}
         parent_id, missing = self.resolve_m2o('product.category', record.get('parent_id'))
         if missing:
             return values, missing
@@ -125,6 +134,7 @@ class ProductAttributeMigrator(BaseMigrator):
     target_model = 'product.attribute'
     source_fields = ['name', 'create_variant']
     matching_keys = ['name']
+    domain = [('active', 'in', [True, False])]
 
     def transform(self, record, is_update=False):
         values = {'name': record.get('name') or 'Unknown'}
@@ -140,6 +150,7 @@ class ProductAttributeValueMigrator(BaseMigrator):
     target_model = 'product.attribute.value'
     source_fields = ['name', 'attribute_id']
     matching_keys = []  # find_business_match is overridden below (scoped to attribute)
+    domain = [('active', 'in', [True, False])]
 
     def transform(self, record, is_update=False):
         attribute_id, missing = self.resolve_m2o('product.attribute', record.get('attribute_id'))
@@ -177,14 +188,19 @@ class ProductTemplateMigrator(BaseMigrator):
         'name', 'default_code', 'barcode', 'type', 'sale_ok', 'purchase_ok',
         'list_price', 'standard_price', 'categ_id', 'uom_id', 'uom_po_id',
         'description_sale', 'description_purchase', 'weight', 'volume',
-        'image_1920', 'product_tag_ids', 'attribute_line_ids',
+        'image_1920', 'product_tag_ids', 'attribute_line_ids', 'active',
         'product_variant_id', 'product_variant_ids',
     ]
     matching_keys = ['default_code', 'barcode']
+    # A discontinued/archived product referenced by an old Sales or
+    # Purchase order line must still be migrated, or that order line fails
+    # as a missing dependency (same failure mode diagnosed for contacts).
+    domain = [('active', 'in', [True, False])]
 
     def transform(self, record, is_update=False):
         values = {
             'name': record.get('name') or 'Unknown',
+            'active': record.get('active', True),
             'default_code': record.get('default_code') or False,
             'barcode': record.get('barcode') or False,
             'sale_ok': bool(record.get('sale_ok')),
