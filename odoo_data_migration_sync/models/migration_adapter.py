@@ -52,8 +52,8 @@ class BaseOdooAdapter:
 class XmlRpcAdapter(BaseOdooAdapter):
     """Transport adapter for Odoo's standard XML-RPC external API.
 
-    Works against Odoo 16, 17 and 18 sources - this is the only transport
-    the Odoo 18 target variant of this module needs.
+    Works against Odoo 16, 17, 18 and 19 sources - this is the only
+    transport the Odoo 19 target variant of this module needs.
     """
 
     def __init__(self, url, database, username, password):

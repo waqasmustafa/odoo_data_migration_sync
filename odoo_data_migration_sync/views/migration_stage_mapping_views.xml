@@ -8,8 +8,8 @@
             <list string="CRM Stage Mapping" editable="bottom">
                 <field name="connection_id" column_invisible="1"/>
                 <field name="sequence" widget="handle"/>
-                <field name="source_stage_name" string="Source Stage (Odoo 17)" readonly="1"/>
-                <field name="target_stage_id" string="Target Stage (Odoo 18)"/>
+                <field name="source_stage_name" string="Source Stage" readonly="1"/>
+                <field name="target_stage_id" string="Target Stage (Odoo 19)"/>
             </list>
         </field>
     </record>

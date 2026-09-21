@@ -300,7 +300,7 @@ class BaseMigrator:
         """fields filtered down to those that actually exist on `model` in
         this particular source database. A field can be missing/renamed on
         an older or newer Odoo version (e.g. product.template.type changed
-        across 16/17/18, or sale.order.line vs purchase.order.line using
+        across 16/17/18/19, or sale.order.line vs purchase.order.line using
         different tax field names) - without this guard, one unknown field
         name would make the whole batch read fail instead of just that one
         field being skipped."""
@@ -325,7 +325,7 @@ class BaseMigrator:
         against our own local model registry, so (unlike the source-side
         field guards above, which depend on a remote fields_get call) it is
         always 100% accurate - the final safety net for a target field name
-        that turns out not to exist on this Odoo 18 installation (e.g. a
+        that turns out not to exist on this Odoo 19 installation (e.g. a
         field that was renamed/removed between versions)."""
         valid_fields = self.env[model or self.target_model]._fields
         dropped = [key for key in values if key not in valid_fields]
