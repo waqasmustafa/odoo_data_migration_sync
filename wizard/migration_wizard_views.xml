@@ -15,7 +15,10 @@
                         <field name="migrate_partners"/>
                         <field name="migrate_categories"/>
                         <field name="migrate_products"/>
+                        <field name="migrate_employees"/>
+                        <field name="migrate_inventory"/>
                         <field name="migrate_crm"/>
+                        <field name="migrate_projects"/>
                         <field name="migrate_sales"/>
                         <field name="migrate_purchases"/>
                     </group>

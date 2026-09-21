@@ -12,7 +12,10 @@ class MigrationWizard(models.TransientModel):
     migrate_partners = fields.Boolean(string='Contacts', default=True)
     migrate_categories = fields.Boolean(string='Product Categories', default=True)
     migrate_products = fields.Boolean(string='Products', default=True)
+    migrate_employees = fields.Boolean(string='Employees')
+    migrate_inventory = fields.Boolean(string='Inventory (Warehouses & Locations)')
     migrate_crm = fields.Boolean(string='CRM Leads/Opportunities')
+    migrate_projects = fields.Boolean(string='Projects & Tasks')
     migrate_sales = fields.Boolean(string='Sales Orders')
     migrate_purchases = fields.Boolean(string='Purchase Orders')
 
@@ -29,7 +32,10 @@ class MigrationWizard(models.TransientModel):
             'migrate_partners': ('res_partner',),
             'migrate_categories': ('product_category',),
             'migrate_products': ('product_attribute', 'product_attribute_value', 'product_template'),
+            'migrate_employees': ('hr_department', 'hr_employee'),
+            'migrate_inventory': ('stock_warehouse', 'stock_location'),
             'migrate_crm': ('crm_lead',),
+            'migrate_projects': ('project_project', 'project_task'),
             'migrate_sales': ('sale_order',),
             'migrate_purchases': ('purchase_order',),
         }

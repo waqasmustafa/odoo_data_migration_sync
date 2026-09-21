@@ -447,6 +447,257 @@ class CrmLeadMigrator(_AddressMixin, BaseMigrator):
         return target_id
 
 
+@register_migrator('hr_department')
+class HrDepartmentMigrator(BaseMigrator):
+    source_model = 'hr.department'
+    target_model = 'hr.department'
+    source_fields = ['name', 'parent_id']
+    matching_keys = ['name']  # unused directly - find_business_match is overridden below
+    self_referential_fields = ['parent_id']
+    domain = [('active', 'in', [True, False])]
+
+    def transform(self, record, is_update=False):
+        values = {'name': record.get('name') or 'Unknown'}
+        parent_id, missing = self.resolve_m2o('hr.department', record.get('parent_id'))
+        if missing:
+            return values, missing
+        if parent_id:
+            values['parent_id'] = parent_id
+        return values, None
+
+    def find_business_match(self, values):
+        """Same reasoning as product categories: a department name is only
+        unique within its own parent (e.g. "Support" under both "Sales"
+        and "Engineering")."""
+        Target = self.env[self.target_model]
+        name = values.get('name')
+        if not name:
+            return Target.browse(), None, None
+        domain = [('name', '=', name), ('parent_id', '=', values.get('parent_id') or False)]
+        found = Target.search(domain, limit=2)
+        if len(found) != 1:
+            return Target.browse(), None, None
+        if self._is_target_claimed(found.id):
+            return Target.browse(), None, (
+                'Business-key match on "name+parent" ignored - already linked to '
+                'a different source record; created as a new record instead.')
+        return found, 'name+parent', None
+
+
+@register_migrator('hr_employee')
+class HrEmployeeMigrator(BaseMigrator):
+    source_model = 'hr.employee'
+    target_model = 'hr.employee'
+    source_fields = [
+        'name', 'work_email', 'work_phone', 'mobile_phone', 'job_title',
+        'department_id', 'parent_id', 'job_id', 'resource_calendar_id',
+        'gender', 'birthday', 'identification_id', 'barcode', 'active',
+    ]
+    matching_keys = ['work_email', 'barcode']
+    self_referential_fields = ['parent_id']  # manager is also an hr.employee
+    # Terminated/archived employees must still be migrated, or an old Sales
+    # Order/Project Task that names them as salesperson/assignee would fail
+    # as a missing dependency (same failure mode diagnosed for contacts).
+    domain = [('active', 'in', [True, False])]
+
+    def transform(self, record, is_update=False):
+        values = {
+            'name': record.get('name') or 'Unknown',
+            'work_email': record.get('work_email') or False,
+            'work_phone': record.get('work_phone') or False,
+            'mobile_phone': record.get('mobile_phone') or False,
+            'job_title': record.get('job_title') or False,
+            'active': record.get('active', True),
+            'identification_id': record.get('identification_id') or False,
+            'barcode': record.get('barcode') or False,
+        }
+        if record.get('gender') in ('male', 'female', 'other'):
+            values['gender'] = record['gender']
+        if record.get('birthday'):
+            values['birthday'] = record['birthday']
+
+        department_id, missing = self.resolve_m2o('hr.department', record.get('department_id'))
+        if missing:
+            return values, missing
+        if department_id:
+            values['department_id'] = department_id
+
+        # The manager is nice-to-have, not required - a missing manager
+        # link must never block the employee record itself.
+        manager_id, _missing = self.resolve_m2o('hr.employee', record.get('parent_id'))
+        if manager_id:
+            values['parent_id'] = manager_id
+
+        job = record.get('job_id')
+        if job:
+            job_id = self.resolve_by_name('hr.job', job[1], '_job_cache')
+            if job_id:
+                values['job_id'] = job_id
+
+        calendar = record.get('resource_calendar_id')
+        if calendar:
+            calendar_id = self.resolve_by_name('resource.calendar', calendar[1], '_calendar_cache')
+            if calendar_id:
+                values['resource_calendar_id'] = calendar_id
+
+        return values, missing
+
+
+@register_migrator('stock_warehouse')
+class StockWarehouseMigrator(BaseMigrator):
+    source_model = 'stock.warehouse'
+    target_model = 'stock.warehouse'
+    source_fields = ['name', 'code']
+    matching_keys = ['code', 'name']
+
+    def transform(self, record, is_update=False):
+        return {
+            'name': record.get('name') or 'Unknown',
+            'code': record.get('code') or False,
+        }, None
+
+
+@register_migrator('stock_location')
+class StockLocationMigrator(BaseMigrator):
+    """Master data only (warehouses/locations) - never quantities/on-hand
+    stock. Two Odoo databases essentially never agree on real-world stock
+    levels, and copying quant data blindly risks silently wrong inventory
+    valuation; the doc's own guidance (and this deployment's choice) is
+    that opening balances belong in a separate, deliberate Inventory
+    Adjustment done by the business, not an automated field copy."""
+    source_model = 'stock.location'
+    target_model = 'stock.location'
+    source_fields = ['name', 'location_id', 'usage', 'warehouse_id', 'active']
+    matching_keys = []  # find_business_match is overridden below (scoped to parent)
+    self_referential_fields = ['location_id']
+    domain = [('active', 'in', [True, False])]
+
+    def transform(self, record, is_update=False):
+        values = {'name': record.get('name') or 'Unknown'}
+        if record.get('usage') in ('supplier', 'view', 'internal', 'customer',
+                                    'inventory', 'procurement', 'production', 'transit'):
+            values['usage'] = record['usage']
+
+        parent_id, missing = self.resolve_m2o('stock.location', record.get('location_id'))
+        if missing:
+            return values, missing
+        if parent_id:
+            values['location_id'] = parent_id
+
+        warehouse_id, missing = self.resolve_m2o('stock.warehouse', record.get('warehouse_id'))
+        if missing:
+            # A location's warehouse link is informational - do not block
+            # on it (e.g. Odoo's own top-level "Physical Locations" has none).
+            missing = None
+        if warehouse_id:
+            values['warehouse_id'] = warehouse_id
+
+        return values, missing
+
+    def find_business_match(self, values):
+        """A location name ("Stock", "Input", "Output"...) is only
+        meaningful within its parent location - never match on name alone."""
+        Target = self.env[self.target_model]
+        name = values.get('name')
+        if not name:
+            return Target.browse(), None, None
+        domain = [('name', '=', name), ('location_id', '=', values.get('location_id') or False)]
+        found = Target.search(domain, limit=2)
+        if len(found) != 1:
+            return Target.browse(), None, None
+        if self._is_target_claimed(found.id):
+            return Target.browse(), None, (
+                'Business-key match on "name+parent" ignored - already linked to '
+                'a different source record; created as a new record instead.')
+        return found, 'name+parent', None
+
+
+@register_migrator('project_project')
+class ProjectMigrator(BaseMigrator):
+    source_model = 'project.project'
+    target_model = 'project.project'
+    source_fields = ['name', 'partner_id', 'user_id', 'active']
+    matching_keys = ['name']
+    domain = [('active', 'in', [True, False])]
+
+    def transform(self, record, is_update=False):
+        values = {
+            'name': record.get('name') or 'Unknown',
+            'active': record.get('active', True),
+        }
+        partner_id, missing = self.resolve_m2o('res.partner', record.get('partner_id'))
+        if missing:
+            missing = None  # nice-to-have, not required
+        if partner_id:
+            values['partner_id'] = partner_id
+
+        user_id = self.resolve_user(record.get('user_id'))
+        if user_id:
+            values['user_id'] = user_id
+
+        return values, missing
+
+
+@register_migrator('project_task')
+class ProjectTaskMigrator(BaseMigrator):
+    source_model = 'project.task'
+    target_model = 'project.task'
+    source_fields = [
+        'name', 'project_id', 'partner_id', 'user_ids', 'user_id', 'stage_id',
+        'date_deadline', 'priority', 'description', 'tag_ids', 'active',
+    ]
+    matching_keys = []
+    domain = [('active', 'in', [True, False])]
+
+    def transform(self, record, is_update=False):
+        project_id, missing = self.resolve_m2o('project.project', record.get('project_id'))
+        if missing:
+            return {}, missing
+        values = {
+            'project_id': project_id,
+            'name': record.get('name') or 'Unknown',
+            'date_deadline': record.get('date_deadline') or False,
+            'priority': record.get('priority') or '0',
+            'description': record.get('description') or False,
+            'active': record.get('active', True),
+        }
+
+        partner_id, p_missing = self.resolve_m2o('res.partner', record.get('partner_id'))
+        if partner_id:
+            values['partner_id'] = partner_id
+
+        assignee_ids = self._resolve_assignees(record)
+        if assignee_ids:
+            values['user_ids'] = [(6, 0, assignee_ids)]
+
+        stage = record.get('stage_id')
+        if stage:
+            stage_id = self.resolve_by_name('project.task.type', stage[1], '_stage_cache')
+            if stage_id:
+                values['stage_id'] = stage_id
+
+        tag_ids = record.get('tag_ids')
+        if tag_ids:
+            values['tag_ids'] = [(6, 0, self.resolve_or_create_m2m_by_name(
+                'project.tags', tag_ids, 'project.tags', '_tag_cache'))]
+
+        return values, missing
+
+    def _resolve_assignees(self, record):
+        # Odoo moved from a single 'user_id' to multi-assignee 'user_ids'
+        # around v17 - support whichever the source actually has.
+        raw_ids = record.get('user_ids')
+        if not raw_ids and record.get('user_id'):
+            value = record['user_id']
+            raw_ids = [value[0] if isinstance(value, (list, tuple)) else value]
+        resolved = []
+        for uid in (raw_ids or []):
+            target_id = self.resolve_user(uid)
+            if target_id:
+                resolved.append(target_id)
+        return resolved
+
+
 class _OrderMigratorMixin:
     """Shared line-building and header-resolution logic for sale.order and
     purchase.order.

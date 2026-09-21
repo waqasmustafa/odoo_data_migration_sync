@@ -14,7 +14,13 @@ MIGRATION_ORDER = [
     'product_attribute',
     'product_attribute_value',
     'product_template',
+    'hr_department',
+    'hr_employee',
+    'stock_warehouse',
+    'stock_location',
     'crm_lead',
+    'project_project',
+    'project_task',
     'sale_order',
     'purchase_order',
 ]
