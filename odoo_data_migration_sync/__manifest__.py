@@ -4,7 +4,7 @@
     'summary': 'Connect two Odoo databases and safely migrate/sync Contacts, Products, CRM, HR, Inventory, Projects, Sales, Purchase & POS data',
 
     'description': '''
-        Connect a source Odoo database (16/17/18) to this Odoo installation and analyze, map, preview, migrate and verify selected business data - including cross-version migration into Odoo 18.
+        Connect a source Odoo database (16/17/18/19) to this Odoo installation and analyze, map, preview, migrate and verify selected business data - including cross-version migration into Odoo 19.
 
         This is a data migration and synchronization tool, not a one-click full Odoo database upgrade. Target-compatible modules must already be installed on this database before their data can be migrated.
 
@@ -49,7 +49,7 @@
     'price': 149.00,
     'currency': 'USD',
 
-    'version': '18.0.1.0.0',
+    'version': '19.0.1.0.0',
     'license': 'OPL-1',
     'category': 'Extra Tools',
 
