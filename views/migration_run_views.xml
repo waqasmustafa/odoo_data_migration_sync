@@ -9,6 +9,8 @@
                 <header>
                     <button name="action_run" type="object" string="Run Again"
                             class="btn-primary" invisible="state == 'running'"/>
+                    <button name="action_verify" type="object" string="Verify"
+                            class="btn-secondary" invisible="state not in ('done', 'error')"/>
                     <field name="state" widget="statusbar" statusbar_visible="draft,running,done"/>
                 </header>
                 <sheet>
@@ -37,6 +39,23 @@
                     <button name="action_view_errors" type="object" string="View Errors"
                             invisible="error_count == 0"/>
                     <notebook>
+                        <page string="Verification">
+                            <field name="verification_ids" readonly="1">
+                                <list decoration-success="status == 'ready'"
+                                      decoration-warning="status == 'warning'"
+                                      decoration-danger="status == 'blocked'">
+                                    <field name="model_key"/>
+                                    <field name="source_count" string="Source Count"/>
+                                    <field name="mapped_count" string="Mapped in Target"/>
+                                    <field name="created_count"/>
+                                    <field name="updated_count"/>
+                                    <field name="matched_count"/>
+                                    <field name="error_count"/>
+                                    <field name="status" widget="badge"/>
+                                    <field name="note"/>
+                                </list>
+                            </field>
+                        </page>
                         <page string="Record Log">
                             <field name="line_ids" readonly="1">
                                 <list>

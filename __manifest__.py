@@ -22,6 +22,7 @@ on this database before their data can be migrated.
         'views/migration_run_views.xml',
         'views/migration_mapping_views.xml',
         'views/migration_stage_mapping_views.xml',
+        'views/migration_dashboard_views.xml',
         'wizard/migration_wizard_views.xml',
         'views/migration_menus.xml',
     ],

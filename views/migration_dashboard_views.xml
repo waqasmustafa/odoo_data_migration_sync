@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+
+    <record id="view_migration_dashboard_form" model="ir.ui.view">
+        <field name="name">migration.dashboard.form</field>
+        <field name="model">migration.dashboard</field>
+        <field name="arch" type="xml">
+            <form string="Migration Dashboard">
+                <header>
+                    <button name="action_refresh" type="object" string="Refresh" class="btn-secondary"/>
+                </header>
+                <sheet>
+                    <div class="o_settings_container" style="display:flex;gap:16px;flex-wrap:wrap;">
+                        <button name="action_view_connections" type="object" class="oe_stat_button" icon="fa-plug">
+                            <field name="connection_count" widget="statinfo" string="Connections"/>
+                        </button>
+                        <button name="action_view_runs" type="object" class="oe_stat_button" icon="fa-tasks">
+                            <field name="run_count" widget="statinfo" string="Total Runs"/>
+                        </button>
+                        <button name="action_view_runs" type="object" class="oe_stat_button" icon="fa-check-circle">
+                            <field name="run_done_count" widget="statinfo" string="Runs Done"/>
+                        </button>
+                        <button name="action_view_errors" type="object" class="oe_stat_button" icon="fa-exclamation-triangle">
+                            <field name="run_error_count" widget="statinfo" string="Runs Failed"/>
+                        </button>
+                    </div>
+                    <group string="Records">
+                        <group>
+                            <field name="total_created" string="Total Created"/>
+                            <field name="total_updated" string="Total Updated"/>
+                        </group>
+                        <group>
+                            <field name="total_errors" string="Total Errors"/>
+                            <field name="run_running_count" string="Runs In Progress"/>
+                        </group>
+                    </group>
+                    <group string="Last Run">
+                        <field name="last_run_id" readonly="1"/>
+                    </group>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <record id="action_migration_dashboard" model="ir.actions.act_window">
+        <field name="name">Dashboard</field>
+        <field name="res_model">migration.dashboard</field>
+        <field name="view_mode">form</field>
+        <field name="target">current</field>
+    </record>
+
+</odoo>

@@ -4,6 +4,11 @@
     <menuitem id="menu_migration_root" name="Migration"
               sequence="90" groups="base.group_system"/>
 
+    <menuitem id="menu_migration_dashboard" name="Dashboard"
+              parent="menu_migration_root"
+              action="action_migration_dashboard"
+              sequence="1"/>
+
     <menuitem id="menu_migration_connections" name="Connections"
               parent="menu_migration_root"
               action="action_migration_connection"

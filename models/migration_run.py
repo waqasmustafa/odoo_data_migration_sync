@@ -36,6 +36,7 @@ class MigrationRun(models.Model):
     error_count = fields.Integer(readonly=True, copy=False)
 
     line_ids = fields.One2many('migration.run.line', 'run_id')
+    verification_ids = fields.One2many('migration.run.verification', 'run_id')
 
     def _get_runner_class(self):
         from .migration_engine import MigrationRunner
@@ -45,6 +46,76 @@ class MigrationRun(models.Model):
         for run in self:
             runner = run._get_runner_class()(self.env, run)
             runner.run_all()
+        return True
+
+    def action_verify(self):
+        """Step 6 of the migration wizard UX: re-count the source for each
+        migrated model and compare it against how many of those records now
+        have a target mapping, so the user can see at a glance whether the
+        migration is complete (Ready), partially done (Warning) or never
+        produced anything (Blocked) - without trusting run counts alone,
+        since those only reflect this one run, not the connection's full
+        migration history."""
+        from .migration_engine import MIGRATOR_REGISTRY
+        self.ensure_one()
+        self.verification_ids.unlink()
+
+        adapter = self.connection_id._get_adapter()
+        adapter.connect()
+
+        Verification = self.env['migration.run.verification']
+        Mapping = self.env['migration.record.mapping']
+        keys = [k.strip() for k in (self.model_keys or '').split(',') if k.strip()]
+
+        for key in keys:
+            migrator_cls = MIGRATOR_REGISTRY.get(key)
+            if not migrator_cls:
+                continue
+            source_model = migrator_cls.source_model
+            domain = list(migrator_cls.domain)
+            try:
+                source_count = len(adapter.search(source_model, domain))
+            except Exception:
+                try:
+                    source_count = len(adapter.search(source_model, []))
+                except Exception:
+                    source_count = -1
+
+            mapped_count = Mapping.search_count([
+                ('connection_id', '=', self.connection_id.id),
+                ('source_model', '=', source_model),
+            ])
+
+            lines = self.line_ids.filtered(lambda l, key=key: l.model_key == key)
+            created = len(lines.filtered(lambda l: l.state == 'created'))
+            updated = len(lines.filtered(lambda l: l.state == 'updated'))
+            matched = len(lines.filtered(lambda l: l.state == 'matched'))
+            errors = len(lines.filtered(lambda l: l.state == 'error'))
+
+            if source_count < 0:
+                status, note = 'warning', 'Could not re-query the source count.'
+            elif mapped_count == 0:
+                status, note = 'blocked', 'No records were migrated for this model.'
+            elif mapped_count >= source_count and errors == 0:
+                status, note = 'ready', None
+            else:
+                status = 'warning'
+                note = '%s of %s source records are not yet mapped.' % (
+                    max(source_count - mapped_count, 0), source_count)
+
+            Verification.create({
+                'run_id': self.id,
+                'model_key': key,
+                'source_model': source_model,
+                'source_count': source_count,
+                'mapped_count': mapped_count,
+                'created_count': created,
+                'updated_count': updated,
+                'matched_count': matched,
+                'error_count': errors,
+                'status': status,
+                'note': note,
+            })
         return True
 
     def action_view_errors(self):
