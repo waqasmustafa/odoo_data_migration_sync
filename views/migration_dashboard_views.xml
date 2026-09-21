@@ -6,7 +6,7 @@
         <field name="model">migration.dashboard</field>
         <field name="arch" type="xml">
             <form string="Migration Dashboard">
-                <div style="padding: 24px 32px; max-width: 1280px; background:#f7f7fa;">
+                <div style="padding: 24px 32px;  background:#f7f7fa;">
 
                     <div style="display:flex; align-items:flex-start; justify-content:space-between; margin-bottom:22px;">
                         <div style="display:flex; align-items:flex-start; gap:12px;">
