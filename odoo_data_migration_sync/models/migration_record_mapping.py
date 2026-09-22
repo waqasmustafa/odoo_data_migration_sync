@@ -4,7 +4,6 @@ from odoo import fields, models
 class MigrationRecordMapping(models.Model):
     _name = 'migration.record.mapping'
     _description = 'Migration Source -> Target Record Mapping'
-    _rec_name = 'target_res_id'
 
     connection_id = fields.Many2one('migration.connection', required=True,
                                      ondelete='cascade', index=True)
