@@ -24,10 +24,9 @@
                 <field name="source_res_id"/>
                 <field name="target_res_id"/>
                 <field name="connection_id"/>
-                <group expand="0" string="Group By">
-                    <filter name="group_source_model" string="Source Model" context="{'group_by': 'source_model'}"/>
-                    <filter name="group_connection" string="Connection" context="{'group_by': 'connection_id'}"/>
-                </group>
+                <separator/>
+                <filter name="group_source_model" string="Source Model" context="{'group_by': 'source_model'}"/>
+                <filter name="group_connection" string="Connection" context="{'group_by': 'connection_id'}"/>
             </search>
         </field>
     </record>
