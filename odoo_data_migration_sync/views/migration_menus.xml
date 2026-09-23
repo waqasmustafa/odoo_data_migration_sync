@@ -2,6 +2,7 @@
 <odoo>
 
     <menuitem id="menu_migration_root" name="Migration"
+              web_icon="odoo_data_migration_sync,static/description/icon.png"
               sequence="90" groups="base.group_system"/>
 
     <menuitem id="menu_migration_dashboard" name="Dashboard"
